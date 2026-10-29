@@ -50,7 +50,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 .panel{display:none}.panel.active{display:block}
 
 /* ── DASHBOARD GRID ── */
-.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:7px}
 @media(min-width:700px){.dash-grid{grid-template-columns:repeat(4,1fr)}}
 
 .wl-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s}
@@ -58,36 +58,36 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 .wl-card.sig-buy{border-color:var(--buy)}
 .wl-card.sig-sell{border-color:var(--sell)}
 
-.wc-top{padding:10px 11px 6px}
-.wc-row1{display:flex;align-items:center;justify-content:space-between;gap:6px}
-.wc-ticker{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;letter-spacing:-.02em}
-.wc-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;flex-shrink:0}
+.wc-top{padding:6px 10px 4px}
+.wc-row1{display:flex;align-items:center;justify-content:space-between;gap:4px}
+.wc-ticker{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;letter-spacing:-.02em}
+.wc-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:20px;flex-shrink:0}
 .b-buy{background:var(--buy-bg);color:var(--buy)}
 .b-sell{background:var(--sell-bg);color:var(--sell)}
 .b-hold{background:var(--hold-bg);color:var(--hold)}
 
-.wc-name{font-size:10px;color:var(--fg3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wc-price{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;margin-top:6px;line-height:1;color:#fff}
-.wc-chg{font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:3px}
+.wc-name{font-size:9px;color:var(--fg3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-price{font-family:'IBM Plex Mono',monospace;font-size:19px;font-weight:700;margin-top:3px;line-height:1;color:#fff}
+.wc-chg{font-family:'IBM Plex Mono',monospace;font-size:11px;margin-top:2px}
 .up{color:var(--buy)}.dn{color:var(--sell)}.neu{color:var(--hold)}
 
 /* mini chart */
-.wc-chart{height:100px;position:relative;border-top:1px solid var(--border)}
+.wc-chart{height:80px;position:relative;border-top:1px solid var(--border)}
 .mini-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--fg3)}
 
 /* indicators row */
-.wc-inds{display:flex;padding:6px 10px 4px;gap:5px}
-.ind-pill{flex:1;background:var(--bg3);border-radius:6px;padding:4px 5px;text-align:center}
-.ip-label{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
-.ip-val{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;margin-top:2px;color:#fff}
+.wc-inds{display:flex;padding:4px 8px 3px;gap:4px}
+.ind-pill{flex:1;background:var(--bg3);border-radius:5px;padding:3px 4px;text-align:center}
+.ip-label{font-size:8px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
+.ip-val{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;margin-top:1px;color:#fff}
 .ip-val.up{color:#4caf72}.ip-val.dn{color:#f85149}.ip-val.neu{color:#f0a500}
 
 /* entry/stop/target row in card */
 .wc-est{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--border);padding:0}
-.wc-est-col{padding:8px 8px;border-right:1px solid var(--border);text-align:center}
+.wc-est-col{padding:5px 6px;border-right:1px solid var(--border);text-align:center}
 .wc-est-col:last-child{border-right:none}
-.est-label{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
-.est-val{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;margin-top:3px;color:#fff}
+.est-label{font-size:8px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
+.est-val{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;margin-top:2px;color:#fff}
 .est-val.up{color:#4caf72}.est-val.dn{color:#f85149}
 
 /* scanner */
@@ -464,7 +464,7 @@ function buildMiniChart(containerId, candles, rawVolumes) {
 
   const slice = candles.slice(-40); // last 40 candles
   const c = LightweightCharts.createChart(el, {
-    width: el.clientWidth, height: 100,
+    width: el.clientWidth, height: 80,
     layout:{background:{color:'transparent'},textColor:'transparent'},
     grid:{vertLines:{visible:false},horzLines:{visible:false}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Hidden},
