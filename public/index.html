@@ -509,7 +509,6 @@ async function processStock(ticker, data) {
   const bbArr=calcBB(closes,20);
   const bb=bbArr[bbArr.length-1]||null;
   // Supertrend
-  const highs=q.high.map(Number), lows=q.low.map(Number);
   const stTrend=closes.length>12?calcSupertrend(highs,lows,closes):1;
   // Vol score
   const rawVols=(q.volume||[]).map(Number);
