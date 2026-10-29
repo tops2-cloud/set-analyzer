@@ -572,9 +572,17 @@ function renderDashboard() {
       ${d ? (() => {
         const p=d.price;
         let entry,stop,target;
-        if(d.signal==='buy'){ entry=p.toFixed(2); stop=(p*.97).toFixed(2); target=(p*1.06).toFixed(2); }
-        else if(d.signal==='sell'){ entry=p.toFixed(2); stop=(p*1.03).toFixed(2); target=(p*.94).toFixed(2); }
-        else { entry=d.ema20?(d.ema20*.99).toFixed(2):(p*.98).toFixed(2); stop=(p*.965).toFixed(2); target=(p*1.04).toFixed(2); }
+        if(d.signal==='buy'){
+          const e20ref = d.ema20 && d.ema20 < p ? d.ema20 : p*0.98;
+          const low52ref = d.low52 && d.low52 < p ? Math.max(d.low52, p*0.93) : null;
+          const entryVal = low52ref ? Math.max(e20ref, low52ref) : e20ref;
+          entry=entryVal.toFixed(2); stop=(entryVal*.97).toFixed(2); target=(p*1.06).toFixed(2);
+        } else if(d.signal==='sell'){
+          entry=p.toFixed(2); stop=(p*1.03).toFixed(2); target=(p*.94).toFixed(2);
+        } else {
+          const e20ref = d.ema20 && d.ema20 < p ? d.ema20 : p*0.98;
+          entry=e20ref.toFixed(2); stop=(e20ref*.965).toFixed(2); target=(p*1.04).toFixed(2);
+        }
         return `<div class="wc-est">
           <div class="wc-est-col"><div class="est-label">เข้า</div><div class="est-val up">${entry}</div></div>
           <div class="wc-est-col"><div class="est-label">Stop</div><div class="est-val dn">${stop}</div></div>
@@ -612,13 +620,19 @@ function renderAll(){
 function buildListCard(ticker, opts={}) {
   const m=getMeta(ticker), d=STOCKS[ticker];
   const sig=d?.signal||'hold';
-  // calc entry price
-  let entryTxt='—';
-  if(d){
+  // calc entry price — ต่ำกว่าราคาปัจจุบัน เพื่อรอซื้อแนวรับ
+  let entryTxt='—', stopTxt='—';
+  if(d && sig==='buy'){
     const p=d.price;
-    if(sig==='buy') entryTxt=p.toFixed(2);
-    else if(sig==='sell') entryTxt=p.toFixed(2);
-    else entryTxt=d.ema20?(d.ema20*.99).toFixed(2):(p*.98).toFixed(2);
+    // ราคาเข้าแนะนำ = EMA20 ถ้าต่ำกว่าราคาปัจจุบัน ไม่งั้นใช้ -2%
+    const ema20ref = d.ema20 && d.ema20 < p ? d.ema20 : p * 0.98;
+    // เทียบกับ 52w low ด้วย ถ้ามี ใช้ค่าที่สูงกว่า (คือใกล้ราคาปัจจุบันกว่า)
+    const low52ref = d.low52 && d.low52 < p ? Math.max(d.low52, p*0.93) : null;
+    const entryVal = low52ref ? Math.max(ema20ref, low52ref) : ema20ref;
+    entryTxt = entryVal.toFixed(2);
+    stopTxt = (entryVal * 0.97).toFixed(2);
+  } else if(d && sig==='sell'){
+    entryTxt='—'; stopTxt='—';
   }
   const el=document.createElement('div');
   el.className='stock-card'; el.tabIndex=0;
@@ -639,8 +653,8 @@ function buildListCard(ticker, opts={}) {
     </div>
     <div style="text-align:right;flex-shrink:0;min-width:72px">
       <div style="font-size:9px;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em">เข้าแนะนำ</div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--buy);margin-top:2px">${entryTxt}</div>
-      <div style="font-size:9px;color:var(--fg3);margin-top:1px">Stop ${(parseFloat(entryTxt)*0.97).toFixed(2)}</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:${entryTxt==='—'?'var(--fg3)':'var(--buy)'};margin-top:2px">${entryTxt}</div>
+      <div style="font-size:9px;color:var(--fg3);margin-top:1px">${stopTxt!=='—'?'Stop '+stopTxt:''}</div>
     </div>
     ` : '<div style="color:var(--fg3);font-size:11px;margin-left:auto">กำลังโหลด…</div>'}
     ${opts.rm?`<button onclick="rmWL(event,'${ticker}')" style="background:none;border:none;color:var(--sell);font-size:20px;padding:4px 8px;cursor:pointer;margin-left:4px">×</button>`:''}`;
