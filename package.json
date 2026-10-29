@@ -1,0 +1,8 @@
+{
+  "name": "set-analyzer",
+  "version": "1.0.0",
+  "description": "Thai SET Stock Analyzer PWA",
+  "engines": {
+    "node": ">=18"
+  }
+}
