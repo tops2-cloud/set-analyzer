@@ -67,8 +67,8 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 .b-hold{background:var(--hold-bg);color:var(--hold)}
 
 .wc-name{font-size:10px;color:var(--fg3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wc-price{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;margin-top:6px;line-height:1}
-.wc-chg{font-family:'IBM Plex Mono',monospace;font-size:11px;margin-top:3px}
+.wc-price{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;margin-top:6px;line-height:1;color:#fff}
+.wc-chg{font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:3px}
 .up{color:var(--buy)}.dn{color:var(--sell)}.neu{color:var(--hold)}
 
 /* mini chart */
@@ -78,15 +78,17 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 /* indicators row */
 .wc-inds{display:flex;padding:6px 10px 4px;gap:5px}
 .ind-pill{flex:1;background:var(--bg3);border-radius:6px;padding:4px 5px;text-align:center}
-.ip-label{font-size:9px;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em}
-.ip-val{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;margin-top:1px}
+.ip-label{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
+.ip-val{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;margin-top:2px;color:#fff}
+.ip-val.up{color:#4caf72}.ip-val.dn{color:#f85149}.ip-val.neu{color:#f0a500}
 
 /* entry/stop/target row in card */
 .wc-est{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--border);padding:0}
-.wc-est-col{padding:7px 8px;border-right:1px solid var(--border);text-align:center}
+.wc-est-col{padding:8px 8px;border-right:1px solid var(--border);text-align:center}
 .wc-est-col:last-child{border-right:none}
-.est-label{font-size:9px;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em}
-.est-val{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;margin-top:2px}
+.est-label{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
+.est-val{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;margin-top:3px;color:#fff}
+.est-val.up{color:#4caf72}.est-val.dn{color:#f85149}
 
 /* scanner */
 .filters{display:flex;gap:6px;padding:10px 14px 6px;overflow-x:auto;scrollbar-width:none}
@@ -223,6 +225,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 
   <!-- ── WATCHLIST MANAGE ── -->
   <div class="panel" id="panel-watchlist">
+    <div style="padding:10px 14px 0;font-size:12px;color:var(--fg2)">📌 หุ้นที่เพิ่มที่นี่จะแสดงในหน้าแรก (ภาพรวม)</div>
     <div class="wl-row">
       <input class="wl-inp" id="wlInput" placeholder="พิมพ์ ticker เช่น AOT แล้วกด +" autocomplete="off">
       <button class="btn-add" onclick="addWL()">+</button>
