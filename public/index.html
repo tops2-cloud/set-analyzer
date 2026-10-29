@@ -257,7 +257,6 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
     </div>
     <div class="chart-wrap">
       <div class="chart-tb">
-        <button class="cperiod" onclick="setCP(this,'1d','5m')">1D</button>
         <button class="cperiod active" onclick="setCP(this,'1mo','1d')">1M</button>
         <button class="cperiod" onclick="setCP(this,'3mo','1d')">3M</button>
         <button class="cperiod" onclick="setCP(this,'6mo','1d')">6M</button>
@@ -878,17 +877,34 @@ function toggleTheme(){
   }catch(e){}
 })();
 
-// ── Drag & Drop (touch + mouse) ──
+// ── Drag & Drop — long-press to activate (touch + mouse) ──
 let dragSrc=null, dragSrcIdx=-1;
 
 function enableDrag(card, idx){
-  // Mouse
+  // ── Mouse: long-press 500ms to activate drag ──
+  let mouseTimer=null, mouseDragging=false;
+  card.addEventListener('mousedown', e=>{
+    if(e.button!==0) return;
+    mouseTimer=setTimeout(()=>{
+      mouseDragging=true;
+      card.setAttribute('draggable','true');
+      card.classList.add('dragging');
+      // trigger native drag
+      const dragEvt=new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer()});
+      dragSrc=card; dragSrcIdx=idx;
+      card.dispatchEvent(dragEvt);
+    },500);
+  });
+  card.addEventListener('mouseup', ()=>{ clearTimeout(mouseTimer); if(!mouseDragging) card.setAttribute('draggable','false'); mouseDragging=false; });
+  card.addEventListener('mousemove', ()=>{ clearTimeout(mouseTimer); });
+  card.setAttribute('draggable','false');
+
   card.addEventListener('dragstart', e=>{
+    if(!mouseDragging) { e.preventDefault(); return; }
     dragSrc=card; dragSrcIdx=idx;
-    card.classList.add('dragging');
     e.dataTransfer.effectAllowed='move';
   });
-  card.addEventListener('dragend', ()=>card.classList.remove('dragging'));
+  card.addEventListener('dragend', ()=>{ card.classList.remove('dragging'); card.setAttribute('draggable','false'); mouseDragging=false; });
   card.addEventListener('dragover', e=>{e.preventDefault();card.classList.add('drag-over');});
   card.addEventListener('dragleave', ()=>card.classList.remove('drag-over'));
   card.addEventListener('drop', e=>{
@@ -898,26 +914,39 @@ function enableDrag(card, idx){
       saveWL(); renderDashboard();
     }
   });
-  card.setAttribute('draggable','true');
 
-  // Touch
-  let tx=0,ty=0,ghost=null,overCard=null;
+  // ── Touch: long-press 500ms to activate drag ──
+  let longTimer=null, tx=0, ty=0, ghost=null, overCard=null, touchDragging=false;
   card.addEventListener('touchstart', e=>{
     if(e.touches.length!==1) return;
-    dragSrc=card; dragSrcIdx=idx;
     const t=e.touches[0]; tx=t.clientX; ty=t.clientY;
-    // create ghost
-    ghost=card.cloneNode(true);
-    ghost.style.cssText=`position:fixed;left:${card.getBoundingClientRect().left}px;top:${card.getBoundingClientRect().top}px;width:${card.offsetWidth}px;opacity:.75;pointer-events:none;z-index:999;border-radius:12px;transform:scale(1.03);transition:none`;
-    document.body.appendChild(ghost);
-    card.classList.add('dragging');
+    longTimer=setTimeout(()=>{
+      touchDragging=true;
+      dragSrc=card; dragSrcIdx=idx;
+      // vibrate feedback
+      try{ navigator.vibrate && navigator.vibrate(40); }catch(_){}
+      // create ghost
+      const r=card.getBoundingClientRect();
+      ghost=card.cloneNode(true);
+      ghost.style.cssText=`position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;opacity:.75;pointer-events:none;z-index:999;border-radius:12px;transform:scale(1.05);box-shadow:0 8px 24px rgba(0,0,0,.5);transition:none`;
+      document.body.appendChild(ghost);
+      card.classList.add('dragging');
+    }, 500);
   },{passive:true});
+
   card.addEventListener('touchmove', e=>{
-    if(!ghost) return;
-    e.preventDefault();
     const t=e.touches[0];
     const dx=t.clientX-tx, dy=t.clientY-ty;
-    ghost.style.transform=`translate(${dx}px,${dy}px) scale(1.03)`;
+    // cancel long press if finger moved too much before activation
+    if(!touchDragging && (Math.abs(dx)>8||Math.abs(dy)>8)){
+      clearTimeout(longTimer); longTimer=null;
+      return;
+    }
+    if(!touchDragging||!ghost) return;
+    e.preventDefault();
+    ghost.style.left=(parseFloat(ghost.style.left)+dx)+'px';
+    ghost.style.top=(parseFloat(ghost.style.top)+dy)+'px';
+    tx=t.clientX; ty=t.clientY;
     // find card under finger
     ghost.style.display='none';
     const el=document.elementFromPoint(t.clientX,t.clientY);
@@ -927,18 +956,20 @@ function enableDrag(card, idx){
     if(target && target!==card){ target.classList.add('drag-over'); overCard=target; }
     else if(!target) overCard=null;
   },{passive:false});
+
   card.addEventListener('touchend', ()=>{
+    clearTimeout(longTimer); longTimer=null;
     if(ghost){ghost.remove();ghost=null;}
     card.classList.remove('dragging');
-    if(overCard){
+    if(touchDragging && overCard){
       overCard.classList.remove('drag-over');
       const toIdx=parseInt(overCard.dataset.idx);
       if(!isNaN(toIdx) && toIdx!==dragSrcIdx){
         [watchlist[dragSrcIdx], watchlist[toIdx]] = [watchlist[toIdx], watchlist[dragSrcIdx]];
         saveWL(); renderDashboard();
       }
-      overCard=null;
     }
+    overCard=null; touchDragging=false;
     dragSrc=null; dragSrcIdx=-1;
   });
 }
