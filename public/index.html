@@ -572,16 +572,15 @@ function renderDashboard() {
       ${d ? (() => {
         const p=d.price;
         let entry,stop,target;
+        const tk=tickSize(p);
         if(d.signal==='buy'){
-          const e20ref = d.ema20 && d.ema20 < p ? d.ema20 : p*0.98;
-          const low52ref = d.low52 && d.low52 < p ? Math.max(d.low52, p*0.93) : null;
-          const entryVal = low52ref ? Math.max(e20ref, low52ref) : e20ref;
-          entry=entryVal.toFixed(2); stop=(entryVal*.97).toFixed(2); target=(p*1.06).toFixed(2);
+          const ev=calcEntry(d);
+          entry=ev.toFixed(2); stop=snapDown(ev-tk*3).toFixed(2); target=snapUp(p+tk*6).toFixed(2);
         } else if(d.signal==='sell'){
-          entry=p.toFixed(2); stop=(p*1.03).toFixed(2); target=(p*.94).toFixed(2);
+          entry=p.toFixed(2); stop=snapUp(p+tk*3).toFixed(2); target=snapDown(p-tk*6).toFixed(2);
         } else {
-          const e20ref = d.ema20 && d.ema20 < p ? d.ema20 : p*0.98;
-          entry=e20ref.toFixed(2); stop=(e20ref*.965).toFixed(2); target=(p*1.04).toFixed(2);
+          const ev=calcEntry(d);
+          entry=ev.toFixed(2); stop=snapDown(ev-tk*3).toFixed(2); target=snapUp(p+tk*4).toFixed(2);
         }
         return `<div class="wc-est">
           <div class="wc-est-col"><div class="est-label">เข้า</div><div class="est-val up">${entry}</div></div>
@@ -616,6 +615,17 @@ function renderAll(){
   else if(p==='watchlist') renderWatchlistManage();
 }
 
+// ── SET Tick Size helper ──
+function tickSize(p){ return p<2?.01:p<5?.02:p<10?.05:p<25?.1:p<100?.25:p<200?.5:1; }
+function snapDown(p){ const t=tickSize(p); return +(Math.floor(p/t)*t).toFixed(t<.1?2:t<1?2:0); }
+function snapUp(p)  { const t=tickSize(p); return +(Math.ceil(p/t)*t).toFixed(t<.1?2:t<1?2:0); }
+function calcEntry(d){
+  // ราคาเข้าแนะนำ = EMA20 ถ้าต่ำกว่าราคา, ไม่งั้น -3 ticks จากราคาปัจจุบัน
+  const p=d.price, t=tickSize(p);
+  const ema = d.ema20 && d.ema20 < p ? d.ema20 : p - t*3;
+  return snapDown(Math.min(ema, p - t)); // ต้องต่ำกว่าราคาเสมออย่างน้อย 1 tick
+}
+
 // ── List Card (scanner/picks/buy list) ──
 function buildListCard(ticker, opts={}) {
   const m=getMeta(ticker), d=STOCKS[ticker];
@@ -623,14 +633,9 @@ function buildListCard(ticker, opts={}) {
   // calc entry price — ต่ำกว่าราคาปัจจุบัน เพื่อรอซื้อแนวรับ
   let entryTxt='—', stopTxt='—';
   if(d && sig==='buy'){
-    const p=d.price;
-    // ราคาเข้าแนะนำ = EMA20 ถ้าต่ำกว่าราคาปัจจุบัน ไม่งั้นใช้ -2%
-    const ema20ref = d.ema20 && d.ema20 < p ? d.ema20 : p * 0.98;
-    // เทียบกับ 52w low ด้วย ถ้ามี ใช้ค่าที่สูงกว่า (คือใกล้ราคาปัจจุบันกว่า)
-    const low52ref = d.low52 && d.low52 < p ? Math.max(d.low52, p*0.93) : null;
-    const entryVal = low52ref ? Math.max(ema20ref, low52ref) : ema20ref;
-    entryTxt = entryVal.toFixed(2);
-    stopTxt = (entryVal * 0.97).toFixed(2);
+    const ev=calcEntry(d), tk=tickSize(d.price);
+    entryTxt=ev.toFixed(2);
+    stopTxt=snapDown(ev-tk*3).toFixed(2);
   } else if(d && sig==='sell'){
     entryTxt='—'; stopTxt='—';
   }
