@@ -60,7 +60,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:7px}
 @media(min-width:700px){.dash-grid{grid-template-columns:repeat(4,1fr)}}
 
-.wl-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s,opacity .15s;touch-action:none;user-select:none}
+.wl-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s,opacity .15s;user-select:none}
 .wl-card:hover{border-color:var(--accent)}
 .wl-card.sig-buy{border-color:var(--buy)}
 .wl-card.sig-sell{border-color:var(--sell)}
@@ -581,12 +581,7 @@ function renderDashboard() {
           <div class="wc-est-col"><div class="est-label">เป้า</div><div class="est-val up">${target}</div></div>
         </div>`;
       })() : ''}`;
-    card.dataset.idx = tickers.indexOf(ticker);
-    let clickOk=true;
-    card.addEventListener('pointerdown',()=>{ clickOk=true; });
-    card.addEventListener('pointermove',()=>{ clickOk=false; });
-    card.addEventListener('click', ()=>{ if(clickOk) openDetail(ticker); });
-    enableDrag(card, tickers.indexOf(ticker));
+    card.addEventListener('click', ()=>openDetail(ticker));
     grid.appendChild(card);
 
     // draw mini chart if data ready
@@ -701,7 +696,94 @@ function renderPicks(){
 function renderWatchlistManage(){
   const div=document.getElementById('wlManageList'); div.innerHTML='';
   if(!watchlist.length){div.innerHTML='<div class="empty-msg">ยังไม่มีหุ้น — พิมพ์ ticker แล้วกด +</div>';return;}
-  watchlist.forEach(t=>div.appendChild(buildListCard(t,{rm:true})));
+  watchlist.forEach((t,i)=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:8px;touch-action:none';
+    // drag handle
+    const handle=document.createElement('div');
+    handle.innerHTML='⠿';
+    handle.style.cssText='font-size:20px;color:var(--fg3);cursor:grab;padding:4px 6px;flex-shrink:0;user-select:none;-webkit-user-select:none';
+    handle.title='ลากเพื่อเรียงลำดับ';
+    const card=buildListCard(t,{rm:true});
+    card.style.flex='1';
+    card.style.minWidth='0';
+    row.appendChild(handle);
+    row.appendChild(card);
+    row.dataset.idx=i;
+    enableWLDrag(row, handle, i);
+    div.appendChild(row);
+  });
+}
+
+// ── Drag-to-reorder for Watchlist rows ──
+let wlDragSrc=-1;
+function enableWLDrag(row, handle, idx){
+  let ghost=null, overRow=null, startY=0, dragging=false;
+
+  // Touch: drag from handle
+  handle.addEventListener('touchstart', e=>{
+    if(e.touches.length!==1) return;
+    e.preventDefault();
+    dragging=true; wlDragSrc=idx;
+    startY=e.touches[0].clientY;
+    const r=row.getBoundingClientRect();
+    ghost=row.cloneNode(true);
+    ghost.style.cssText=`position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;opacity:.8;pointer-events:none;z-index:999;background:var(--bg3);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.4)`;
+    document.body.appendChild(ghost);
+    row.style.opacity='.35';
+    try{navigator.vibrate&&navigator.vibrate(30);}catch(_){}
+  },{passive:false});
+
+  handle.addEventListener('touchmove', e=>{
+    if(!dragging||!ghost) return;
+    e.preventDefault();
+    const t=e.touches[0];
+    const dy=t.clientY-startY;
+    ghost.style.transform=`translateY(${dy}px)`;
+    ghost.style.display='none';
+    const el=document.elementFromPoint(t.clientX, t.clientY);
+    ghost.style.display='';
+    const target=el?.closest('[data-idx]');
+    if(overRow&&overRow!==row) overRow.style.borderTop='';
+    if(target&&target!==row){
+      target.style.borderTop='2px solid var(--accent)';
+      overRow=target;
+    } else { overRow=null; }
+  },{passive:false});
+
+  handle.addEventListener('touchend', ()=>{
+    if(ghost){ghost.remove();ghost=null;}
+    row.style.opacity='';
+    if(overRow){ overRow.style.borderTop=''; }
+    if(dragging && overRow){
+      const toIdx=parseInt(overRow.dataset.idx);
+      if(!isNaN(toIdx)&&toIdx!==wlDragSrc){
+        const item=watchlist.splice(wlDragSrc,1)[0];
+        watchlist.splice(toIdx,0,item);
+        saveWL(); renderWatchlistManage();
+      }
+    }
+    overRow=null; dragging=false; wlDragSrc=-1;
+  });
+
+  // Mouse: native drag from handle
+  handle.setAttribute('draggable','true');
+  handle.addEventListener('dragstart', e=>{
+    wlDragSrc=idx; e.dataTransfer.effectAllowed='move';
+    row.style.opacity='.4';
+  });
+  handle.addEventListener('dragend', ()=>{ row.style.opacity=''; });
+  row.addEventListener('dragover', e=>{ e.preventDefault(); row.style.borderTop='2px solid var(--accent)'; });
+  row.addEventListener('dragleave', ()=>{ row.style.borderTop=''; });
+  row.addEventListener('drop', e=>{
+    e.preventDefault(); row.style.borderTop='';
+    const toIdx=parseInt(row.dataset.idx);
+    if(!isNaN(toIdx)&&toIdx!==wlDragSrc){
+      const item=watchlist.splice(wlDragSrc,1)[0];
+      watchlist.splice(toIdx,0,item);
+      saveWL(); renderWatchlistManage();
+    }
+  });
 }
 
 // ── Detail ──
@@ -877,102 +959,6 @@ function toggleTheme(){
   }catch(e){}
 })();
 
-// ── Drag & Drop — long-press to activate (touch + mouse) ──
-let dragSrc=null, dragSrcIdx=-1;
-
-function enableDrag(card, idx){
-  // ── Mouse: long-press 500ms to activate drag ──
-  let mouseTimer=null, mouseDragging=false;
-  card.addEventListener('mousedown', e=>{
-    if(e.button!==0) return;
-    mouseTimer=setTimeout(()=>{
-      mouseDragging=true;
-      card.setAttribute('draggable','true');
-      card.classList.add('dragging');
-      // trigger native drag
-      const dragEvt=new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer()});
-      dragSrc=card; dragSrcIdx=idx;
-      card.dispatchEvent(dragEvt);
-    },500);
-  });
-  card.addEventListener('mouseup', ()=>{ clearTimeout(mouseTimer); if(!mouseDragging) card.setAttribute('draggable','false'); mouseDragging=false; });
-  card.addEventListener('mousemove', ()=>{ clearTimeout(mouseTimer); });
-  card.setAttribute('draggable','false');
-
-  card.addEventListener('dragstart', e=>{
-    if(!mouseDragging) { e.preventDefault(); return; }
-    dragSrc=card; dragSrcIdx=idx;
-    e.dataTransfer.effectAllowed='move';
-  });
-  card.addEventListener('dragend', ()=>{ card.classList.remove('dragging'); card.setAttribute('draggable','false'); mouseDragging=false; });
-  card.addEventListener('dragover', e=>{e.preventDefault();card.classList.add('drag-over');});
-  card.addEventListener('dragleave', ()=>card.classList.remove('drag-over'));
-  card.addEventListener('drop', e=>{
-    e.preventDefault(); card.classList.remove('drag-over');
-    if(dragSrc && dragSrcIdx!==idx){
-      [watchlist[dragSrcIdx], watchlist[idx]] = [watchlist[idx], watchlist[dragSrcIdx]];
-      saveWL(); renderDashboard();
-    }
-  });
-
-  // ── Touch: long-press 500ms to activate drag ──
-  let longTimer=null, tx=0, ty=0, ghost=null, overCard=null, touchDragging=false;
-  card.addEventListener('touchstart', e=>{
-    if(e.touches.length!==1) return;
-    const t=e.touches[0]; tx=t.clientX; ty=t.clientY;
-    longTimer=setTimeout(()=>{
-      touchDragging=true;
-      dragSrc=card; dragSrcIdx=idx;
-      // vibrate feedback
-      try{ navigator.vibrate && navigator.vibrate(40); }catch(_){}
-      // create ghost
-      const r=card.getBoundingClientRect();
-      ghost=card.cloneNode(true);
-      ghost.style.cssText=`position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;opacity:.75;pointer-events:none;z-index:999;border-radius:12px;transform:scale(1.05);box-shadow:0 8px 24px rgba(0,0,0,.5);transition:none`;
-      document.body.appendChild(ghost);
-      card.classList.add('dragging');
-    }, 500);
-  },{passive:true});
-
-  card.addEventListener('touchmove', e=>{
-    const t=e.touches[0];
-    const dx=t.clientX-tx, dy=t.clientY-ty;
-    // cancel long press if finger moved too much before activation
-    if(!touchDragging && (Math.abs(dx)>8||Math.abs(dy)>8)){
-      clearTimeout(longTimer); longTimer=null;
-      return;
-    }
-    if(!touchDragging||!ghost) return;
-    e.preventDefault();
-    ghost.style.left=(parseFloat(ghost.style.left)+dx)+'px';
-    ghost.style.top=(parseFloat(ghost.style.top)+dy)+'px';
-    tx=t.clientX; ty=t.clientY;
-    // find card under finger
-    ghost.style.display='none';
-    const el=document.elementFromPoint(t.clientX,t.clientY);
-    ghost.style.display='';
-    const target=el?.closest('.wl-card');
-    if(overCard && overCard!==target) overCard.classList.remove('drag-over');
-    if(target && target!==card){ target.classList.add('drag-over'); overCard=target; }
-    else if(!target) overCard=null;
-  },{passive:false});
-
-  card.addEventListener('touchend', ()=>{
-    clearTimeout(longTimer); longTimer=null;
-    if(ghost){ghost.remove();ghost=null;}
-    card.classList.remove('dragging');
-    if(touchDragging && overCard){
-      overCard.classList.remove('drag-over');
-      const toIdx=parseInt(overCard.dataset.idx);
-      if(!isNaN(toIdx) && toIdx!==dragSrcIdx){
-        [watchlist[dragSrcIdx], watchlist[toIdx]] = [watchlist[toIdx], watchlist[dragSrcIdx]];
-        saveWL(); renderDashboard();
-      }
-    }
-    overCard=null; touchDragging=false;
-    dragSrc=null; dragSrcIdx=-1;
-  });
-}
 
 // ── INIT ──
 const cached=loadCache();
