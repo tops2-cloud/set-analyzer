@@ -17,6 +17,13 @@
   --sell:#f85149;--sell-bg:#2d0f0f;--hold:#d29922;--hold-bg:#2d2200;
   --r:12px;color-scheme:dark;
 }
+:root[data-theme="light"] {
+  --bg:#f0f2f5;--bg2:#ffffff;--bg3:#e4e8ed;--border:#c8cdd5;
+  --fg:#1a1d23;--fg2:#4a5568;--fg3:#718096;
+  --accent:#c47f00;--buy:#1a7f37;--buy-bg:#d4f0dc;
+  --sell:#cf222e;--sell-bg:#ffd8d8;--hold:#8a6300;--hold-bg:#fff0c0;
+  color-scheme:light;
+}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;font-family:'IBM Plex Sans Thai',system-ui,sans-serif;font-size:14px;background:var(--bg);color:var(--fg);overflow-x:hidden}
 
@@ -53,10 +60,12 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:7px}
 @media(min-width:700px){.dash-grid{grid-template-columns:repeat(4,1fr)}}
 
-.wl-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s}
-.wl-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+.wl-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color .15s,transform .1s,opacity .15s;touch-action:none;user-select:none}
+.wl-card:hover{border-color:var(--accent)}
 .wl-card.sig-buy{border-color:var(--buy)}
 .wl-card.sig-sell{border-color:var(--sell)}
+.wl-card.dragging{opacity:.45;transform:scale(.97);border-color:var(--accent)!important;z-index:10}
+.wl-card.drag-over{border-color:var(--accent)!important;border-style:dashed;background:var(--bg3)}
 
 .wc-top{padding:6px 10px 4px}
 .wc-row1{display:flex;align-items:center;justify-content:space-between;gap:4px}
@@ -182,6 +191,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
     <input class="search-input" id="searchInput" placeholder="ค้นหา PTT, BDMS, SPALI…" autocomplete="off" spellcheck="false">
     <div class="search-dd" id="searchDd"></div>
   </div>
+  <button id="themeBtn" onclick="toggleTheme()" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font-size:16px;cursor:pointer;flex-shrink:0;line-height:1">🌙</button>
 </header>
 <div class="status-bar">
   <span class="dot spin" id="sDot"></span>
@@ -247,6 +257,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
     </div>
     <div class="chart-wrap">
       <div class="chart-tb">
+        <button class="cperiod" onclick="setCP(this,'1d','5m')">1D</button>
         <button class="cperiod active" onclick="setCP(this,'1mo','1d')">1M</button>
         <button class="cperiod" onclick="setCP(this,'3mo','1d')">3M</button>
         <button class="cperiod" onclick="setCP(this,'6mo','1d')">6M</button>
@@ -463,9 +474,11 @@ function buildMiniChart(containerId, candles, rawVolumes) {
   if(!candles || candles.length < 5) { el.innerHTML='<div class="mini-loading">ไม่มีข้อมูล</div>'; return; }
 
   const slice = candles.slice(-40); // last 40 candles
+  const isLight = document.documentElement.getAttribute('data-theme')==='light';
+  const chartBg = isLight ? '#ffffff' : '#161b22';
   const c = LightweightCharts.createChart(el, {
     width: el.clientWidth, height: 80,
-    layout:{background:{color:'transparent'},textColor:'transparent'},
+    layout:{background:{color:chartBg},textColor:'transparent'},
     grid:{vertLines:{visible:false},horzLines:{visible:false}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Hidden},
     rightPriceScale:{visible:false, scaleMargins:{top:0.05, bottom:0.25}},
@@ -569,7 +582,12 @@ function renderDashboard() {
           <div class="wc-est-col"><div class="est-label">เป้า</div><div class="est-val up">${target}</div></div>
         </div>`;
       })() : ''}`;
-    card.addEventListener('click', ()=>openDetail(ticker));
+    card.dataset.idx = tickers.indexOf(ticker);
+    let clickOk=true;
+    card.addEventListener('pointerdown',()=>{ clickOk=true; });
+    card.addEventListener('pointermove',()=>{ clickOk=false; });
+    card.addEventListener('click', ()=>{ if(clickOk) openDetail(ticker); });
+    enableDrag(card, tickers.indexOf(ticker));
     grid.appendChild(card);
 
     // draw mini chart if data ready
@@ -596,26 +614,42 @@ function renderAll(){
   else if(p==='watchlist') renderWatchlistManage();
 }
 
-// ── List Card (scanner/picks) ──
+// ── List Card (scanner/picks/buy list) ──
 function buildListCard(ticker, opts={}) {
   const m=getMeta(ticker), d=STOCKS[ticker];
   const sig=d?.signal||'hold';
+  // calc entry price
+  let entryTxt='—';
+  if(d){
+    const p=d.price;
+    if(sig==='buy') entryTxt=p.toFixed(2);
+    else if(sig==='sell') entryTxt=p.toFixed(2);
+    else entryTxt=d.ema20?(d.ema20*.99).toFixed(2):(p*.98).toFixed(2);
+  }
   const el=document.createElement('div');
   el.className='stock-card'; el.tabIndex=0;
   el.innerHTML=`
     <div class="sc-left">
       <div class="sc-ticker">${ticker} <span class="badge b-${sig}" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px">${sig==='buy'?'ซื้อ':sig==='sell'?'ขาย':'ถือ'}</span></div>
       <div class="sc-name">${m.n}</div>
-      <div class="sc-dots">
+      <div class="sc-dots" style="margin-top:3px">
         <span class="sdot" style="background:var(--${d?(d.rsi<40?'buy':d.rsi>60?'sell':'hold'):'hold'})" title="RSI"></span>
         <span class="sdot" style="background:var(--${d?(d.macdHist>0?'buy':'sell'):'hold'})" title="MACD"></span>
         <span class="sdot" style="background:var(--${d?(d.emaPos==='above'?'buy':d.emaPos==='below'?'sell':'hold'):'hold'})" title="EMA"></span>
       </div>
     </div>
-    <div class="sc-right">
-      ${d?`<div class="sc-price ${cc(d.chg)}">${fmtP(d.price)}</div><div class="sc-chg ${cc(d.chg)}">${fmtC(d.chg,d.pct)}</div>`:'<div style="color:var(--fg3);font-size:11px">กำลังโหลด…</div>'}
+    ${d ? `
+    <div style="flex:1;min-width:0;padding:0 8px">
+      <div class="sc-price ${cc(d.chg)}" style="font-size:15px">${fmtP(d.price)}</div>
+      <div class="sc-chg ${cc(d.chg)}">${d.chg>=0?'+':''}${d.pct.toFixed(2)}%</div>
     </div>
-    ${opts.rm?`<button onclick="rmWL(event,'${ticker}')" style="background:none;border:none;color:var(--sell);font-size:20px;padding:4px 8px;cursor:pointer">×</button>`:''}`;
+    <div style="text-align:right;flex-shrink:0;min-width:72px">
+      <div style="font-size:9px;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em">เข้าแนะนำ</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--buy);margin-top:2px">${entryTxt}</div>
+      <div style="font-size:9px;color:var(--fg3);margin-top:1px">Stop ${(parseFloat(entryTxt)*0.97).toFixed(2)}</div>
+    </div>
+    ` : '<div style="color:var(--fg3);font-size:11px;margin-left:auto">กำลังโหลด…</div>'}
+    ${opts.rm?`<button onclick="rmWL(event,'${ticker}')" style="background:none;border:none;color:var(--sell);font-size:20px;padding:4px 8px;cursor:pointer;margin-left:4px">×</button>`:''}`;
   el.addEventListener('click',()=>openDetail(ticker));
   return el;
 }
@@ -748,13 +782,14 @@ async function loadDetailChart(ticker,range,interval){
     layout:{background:{color:'#161b22'},textColor:'#8b949e'},
     grid:{vertLines:{color:'#21262d'},horzLines:{color:'#21262d'}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-    rightPriceScale:{borderColor:'#30363d',scaleMargins:{top:0.08,bottom:0.22}},
+    rightPriceScale:{borderColor:'#30363d',scaleMargins:{top:0.05,bottom:0.13}},
     timeScale:{borderColor:'#30363d',timeVisible:true},
   });
   cSeries=lwc.addCandlestickSeries({upColor:'#2ea043',downColor:'#f85149',borderUpColor:'#2ea043',borderDownColor:'#f85149',wickUpColor:'#2ea043',wickDownColor:'#f85149'});
   e20s=lwc.addLineSeries({color:'#f0a500',lineWidth:1.5,priceLineVisible:false,lastValueVisible:false});
   e50s=lwc.addLineSeries({color:'#58a6ff',lineWidth:1.5,priceLineVisible:false,lastValueVisible:false});
-  vSeries=lwc.addHistogramSeries({color:'#30363d',priceFormat:{type:'volume'},priceScaleId:'vol',scaleMargins:{top:0.8,bottom:0}});
+  vSeries=lwc.addHistogramSeries({color:'#30363d',priceFormat:{type:'volume'},priceScaleId:'vol'});
+  lwc.priceScale('vol').applyOptions({scaleMargins:{top:0.88,bottom:0},visible:false});
   lwc.subscribeCrosshairMove(p=>{if(!p.time||!p.seriesData)return;const cd=p.seriesData.get(cSeries);if(!cd)return;document.getElementById('chartOHLC').textContent=`O:${cd.open?.toFixed(2)} H:${cd.high?.toFixed(2)} L:${cd.low?.toFixed(2)} C:${cd.close?.toFixed(2)}`;});
   new ResizeObserver(()=>{if(lwc)lwc.applyOptions({width:c.clientWidth});}).observe(c);
   try{
@@ -822,6 +857,91 @@ function pickSearch(t){si.value='';sd.style.display='none';if(!STOCKS_DB.find(s=
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500);}
 window.addEventListener('online',()=>fetchAll());
 window.addEventListener('offline',()=>setS('err','📴 Offline'));
+
+// ── Theme Toggle ──
+function toggleTheme(){
+  const root=document.documentElement;
+  const isDark=root.getAttribute('data-theme')==='light'?false:true;
+  root.setAttribute('data-theme', isDark?'light':'dark');
+  document.getElementById('themeBtn').textContent = isDark?'🌙':'☀️';
+  try{localStorage.setItem('set_theme', isDark?'light':'dark');}catch(e){}
+  // rebuild mini charts with new bg
+  setTimeout(()=>renderDashboard(),50);
+}
+(function initTheme(){
+  try{
+    const t=localStorage.getItem('set_theme');
+    if(t){
+      document.documentElement.setAttribute('data-theme',t);
+      document.getElementById('themeBtn').textContent=t==='light'?'🌙':'☀️';
+    }
+  }catch(e){}
+})();
+
+// ── Drag & Drop (touch + mouse) ──
+let dragSrc=null, dragSrcIdx=-1;
+
+function enableDrag(card, idx){
+  // Mouse
+  card.addEventListener('dragstart', e=>{
+    dragSrc=card; dragSrcIdx=idx;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed='move';
+  });
+  card.addEventListener('dragend', ()=>card.classList.remove('dragging'));
+  card.addEventListener('dragover', e=>{e.preventDefault();card.classList.add('drag-over');});
+  card.addEventListener('dragleave', ()=>card.classList.remove('drag-over'));
+  card.addEventListener('drop', e=>{
+    e.preventDefault(); card.classList.remove('drag-over');
+    if(dragSrc && dragSrcIdx!==idx){
+      [watchlist[dragSrcIdx], watchlist[idx]] = [watchlist[idx], watchlist[dragSrcIdx]];
+      saveWL(); renderDashboard();
+    }
+  });
+  card.setAttribute('draggable','true');
+
+  // Touch
+  let tx=0,ty=0,ghost=null,overCard=null;
+  card.addEventListener('touchstart', e=>{
+    if(e.touches.length!==1) return;
+    dragSrc=card; dragSrcIdx=idx;
+    const t=e.touches[0]; tx=t.clientX; ty=t.clientY;
+    // create ghost
+    ghost=card.cloneNode(true);
+    ghost.style.cssText=`position:fixed;left:${card.getBoundingClientRect().left}px;top:${card.getBoundingClientRect().top}px;width:${card.offsetWidth}px;opacity:.75;pointer-events:none;z-index:999;border-radius:12px;transform:scale(1.03);transition:none`;
+    document.body.appendChild(ghost);
+    card.classList.add('dragging');
+  },{passive:true});
+  card.addEventListener('touchmove', e=>{
+    if(!ghost) return;
+    e.preventDefault();
+    const t=e.touches[0];
+    const dx=t.clientX-tx, dy=t.clientY-ty;
+    ghost.style.transform=`translate(${dx}px,${dy}px) scale(1.03)`;
+    // find card under finger
+    ghost.style.display='none';
+    const el=document.elementFromPoint(t.clientX,t.clientY);
+    ghost.style.display='';
+    const target=el?.closest('.wl-card');
+    if(overCard && overCard!==target) overCard.classList.remove('drag-over');
+    if(target && target!==card){ target.classList.add('drag-over'); overCard=target; }
+    else if(!target) overCard=null;
+  },{passive:false});
+  card.addEventListener('touchend', ()=>{
+    if(ghost){ghost.remove();ghost=null;}
+    card.classList.remove('dragging');
+    if(overCard){
+      overCard.classList.remove('drag-over');
+      const toIdx=parseInt(overCard.dataset.idx);
+      if(!isNaN(toIdx) && toIdx!==dragSrcIdx){
+        [watchlist[dragSrcIdx], watchlist[toIdx]] = [watchlist[toIdx], watchlist[dragSrcIdx]];
+        saveWL(); renderDashboard();
+      }
+      overCard=null;
+    }
+    dragSrc=null; dragSrcIdx=-1;
+  });
+}
 
 // ── INIT ──
 const cached=loadCache();
