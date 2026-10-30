@@ -404,6 +404,7 @@ const IND_DEFS = [
   {id:'vol',   name:'Volume',        icon:'📦', desc:'ปริมาณซื้อขาย — ยืนยันสัญญาณ ไม่ถูกหลอก', on:false},
   {id:'bb',    name:'Bollinger Bands',icon:'🎯', desc:'แนวรับ/แนวต้านแบบ dynamic', on:false},
   {id:'st',    name:'Supertrend',    icon:'🚀', desc:'บอก uptrend/downtrend ด้วยเส้นเดียว', on:false},
+  {id:'vwap',  name:'VWAP',         icon:'💧', desc:'ราคาเฉลี่ยถ่วงน้ำหนัก Volume — จุดเข้าที่ดีเมื่อราคาต่ำกว่า VWAP', on:false},
 ];
 let indSettings = {};
 let sigThreshold = 2;
@@ -464,6 +465,19 @@ function calcSupertrend(highs, lows, closes, atrPeriod=10, mult=3){
   }
   return trend[trend.length-1]; // 1 = uptrend, -1 = downtrend
 }
+function calcVWAP(candles, volumes){
+  // VWAP = sum(typical_price * volume) / sum(volume) สำหรับ N วันล่าสุด
+  if(!candles||candles.length<5||!volumes||volumes.length<5) return null;
+  const n=Math.min(candles.length, volumes.length, 20); // ใช้ 20 วัน
+  const cSlice=candles.slice(-n), vSlice=volumes.slice(-n);
+  let sumPV=0, sumV=0;
+  for(let i=0;i<n;i++){
+    const tp=(cSlice[i].high+cSlice[i].low+cSlice[i].close)/3;
+    const vol=vSlice[i]||0;
+    sumPV+=tp*vol; sumV+=vol;
+  }
+  return sumV>0 ? sumPV/sumV : null;
+}
 function calcVolScore(volumes, closes){
   if(!volumes||volumes.length<20) return 0;
   const vRecent=volumes.slice(-5);
@@ -511,8 +525,6 @@ async function processStock(ticker, data) {
   const rawVols=(q.volume||[]).map(Number);
   const volScore=calcVolScore(rawVols, closes);
 
-  const signal=calcSignal({rsi,macdHist,macdHistPrev:histPrev,emaPos,bb,price,stTrend,volScore});
-
   // store raw candles + volumes for mini chart
   const candles=[], volumes=[];
   for(let i=0;i<ts.length;i++){
@@ -520,7 +532,11 @@ async function processStock(ticker, data) {
     candles.push({time:ts[i],open:+(q.open?.[i]||q.close[i]).toFixed(2),high:+q.high[i].toFixed(2),low:+q.low[i].toFixed(2),close:+q.close[i].toFixed(2)});
     volumes.push(q.volume?.[i]||0);
   }
-  return{price,chg,pct,high52,low52,rsi,macdHist,macdHistPrev:histPrev,ema20,ema50,emaPos,bb,stTrend,volScore,signal,candles,volumes,ts:Date.now()};
+  // VWAP
+  const vwap=calcVWAP(candles, volumes);
+
+  const signal=calcSignal({rsi,macdHist,macdHistPrev:histPrev,emaPos,bb,price,stTrend,volScore,vwap});
+  return{price,chg,pct,high52,low52,rsi,macdHist,macdHistPrev:histPrev,ema20,ema50,emaPos,bb,stTrend,volScore,vwap,signal,candles,volumes,ts:Date.now()};
 }
 
 // ── Fetch ──
@@ -749,7 +765,7 @@ function renderAll(){
 `;document.head.appendChild(s);})();
 
 // ── Signal Engine (คำนวณจาก indicator ที่เปิดเท่านั้น) ──
-function calcSignal({rsi,macdHist,macdHistPrev,emaPos,bb,price,stTrend,volScore}){
+function calcSignal({rsi,macdHist,macdHistPrev,emaPos,bb,price,stTrend,volScore,vwap}){
   let score=0, maxScore=0;
   // แต่ละ indicator มี max ±2 ยกเว้น EMA ±1
   if(indSettings.rsi){
@@ -776,6 +792,14 @@ function calcSignal({rsi,macdHist,macdHistPrev,emaPos,bb,price,stTrend,volScore}
   if(indSettings.st && stTrend!==undefined){
     maxScore+=2;
     if(stTrend===1)score+=2;else score-=2;
+  }
+  if(indSettings.vwap && vwap && price){
+    maxScore+=2;
+    const vwapDiff=(price-vwap)/vwap;
+    if(vwapDiff<-0.02)score+=2;      // ราคาต่ำกว่า VWAP >2% = จุดเข้าดี
+    else if(vwapDiff<0)score+=1;     // ต่ำกว่า VWAP นิดหน่อย = ok
+    else if(vwapDiff>0.03)score-=2;  // สูงกว่า VWAP >3% = แพงแล้ว
+    else if(vwapDiff>0)score-=1;
   }
   if(maxScore===0) return 'hold';
 
