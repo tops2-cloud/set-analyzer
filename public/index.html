@@ -836,40 +836,45 @@ function calcEntry(d){
   const p=d.price, t=tickSize(p);
   const candidates=[];
 
-  // 1. EMA20 — แนวรับเส้นค่าเฉลี่ย 20 วัน
-  if(d.ema20 && d.ema20 < p*0.999) candidates.push({v:d.ema20, src:'EMA20'});
+  // 1. EMA20 — แนวรับใกล้ (threshold ไว)
+  if(d.ema20 && d.ema20 < p*0.999) candidates.push({v:d.ema20, src:'EMA20', level:1});
 
-  // 2. EMA50 — แนวรับแข็งแกร่งกว่า ถ้าอยู่ต่ำกว่า EMA20
-  if(d.ema50 && d.ema50 < p*0.999) candidates.push({v:d.ema50, src:'EMA50'});
-
-  // 3. Bollinger Band ล่าง — โซน oversold
-  if(d.bb && d.bb.lower && d.bb.lower < p*0.999) candidates.push({v:d.bb.lower, src:'BB Lower'});
-
-  // 4. Local Support — หา swing low ใน 20 แท่งล่าสุด
+  // 2. Local Support swing low 20 แท่ง (threshold ปกติ)
   if(d.candles && d.candles.length>=10){
-    const recent=d.candles.slice(-20);
-    const lows=recent.map(c=>c.low).filter(Boolean);
-    if(lows.length){
-      // หา local low ที่ต่ำกว่าราคาปัจจุบัน
-      const localLow=lows.reduce((a,b)=>b<p && b>p*0.85 ? Math.max(a,b) : a, 0);
-      if(localLow>0) candidates.push({v:localLow, src:'Support'});
-      // หา low สุดใน 10 แท่ง (short-term support)
-      const low10=Math.min(...d.candles.slice(-10).map(c=>c.low).filter(Boolean));
-      if(low10 < p*0.999 && low10 > p*0.85) candidates.push({v:low10, src:'Low10'});
-    }
+    const lows=d.candles.slice(-20).map(c=>c.low).filter(Boolean);
+    const localLow=lows.reduce((a,b)=>b<p && b>p*0.85 ? Math.max(a,b) : a, 0);
+    if(localLow>0) candidates.push({v:localLow, src:'Support', level:2});
   }
 
-  // เลือก candidate ที่ต่ำสุด = support แท้จริง R:R ดีกว่า
-  // กรอง: ต้องต่ำกว่าราคา แต่ไม่ไกลเกิน 20% (ไม่สมเหตุสมผล)
-  const valid=candidates.filter(c=>c.v < p && c.v > p*0.80);
+  // 3. EMA50 — แนวรับแข็งกว่า (threshold ปกติ-เข้มงวด)
+  if(d.ema50 && d.ema50 < p*0.999) candidates.push({v:d.ema50, src:'EMA50', level:2});
+
+  // 4. Bollinger Band ล่าง — โซน oversold จริงๆ (threshold เข้มงวด)
+  if(d.bb && d.bb.lower && d.bb.lower < p*0.999) candidates.push({v:d.bb.lower, src:'BB Lower', level:3});
+
+  // 5. Low 10 แท่ง (threshold เข้มงวด)
+  if(d.candles && d.candles.length>=10){
+    const low10=Math.min(...d.candles.slice(-10).map(c=>c.low).filter(Boolean));
+    if(low10 < p*0.999 && low10 > p*0.80) candidates.push({v:low10, src:'Low 10d', level:3});
+  }
+
+  const valid=candidates.filter(c=>c.v < p && c.v > p*0.78);
+
+  // threshold 1=ไว → เลือก candidate สูงสุด (ใกล้ราคา)
+  // threshold 2=ปกติ → เลือก median
+  // threshold 3=เข้มงวด → เลือก candidate ต่ำสุด (รอลึก)
   if(valid.length){
-    valid.sort((a,b)=>a.v-b.v); // เรียงต่ำสุดขึ้นมา
-    const best=valid[0];
-    return {v:snapDown(best.v), src:best.src};
+    valid.sort((a,b)=>b.v-a.v); // สูง→ต่ำ
+    let pick;
+    if(sigThreshold===1) pick=valid[0];                              // ใกล้สุด
+    else if(sigThreshold===3) pick=valid[valid.length-1];            // ต่ำสุด
+    else pick=valid[Math.floor(valid.length/2)];                     // กลาง
+    return {v:snapDown(pick.v), src:pick.src};
   }
 
-  // fallback: ราคาปัจจุบัน - 5 ticks (ลึกกว่าเดิม)
-  return {v:snapDown(p - t*5), src:'−5 ticks'};
+  // fallback ตาม threshold
+  const fb = sigThreshold===1 ? t*2 : sigThreshold===3 ? t*8 : t*5;
+  return {v:snapDown(p - fb), src:`−${sigThreshold===1?2:sigThreshold===3?8:5} ticks`};
 }
 
 // ── List Card (scanner/picks/buy list) ──
