@@ -1167,6 +1167,7 @@ function fillDetail(ticker,d){
   else if(d.emaPos==='below')rows.push({c:'sell',t:`ราคา ${p.toFixed(2)} ต่ำกว่า EMA20 (${d.ema20?.toFixed(2)}) — Downtrend`});
   else rows.push({c:'hold',t:'ราคาใกล้ EMA20 — Sideways'});
   if(d.high52&&d.low52){const pos=Math.round(((p-d.low52)/(d.high52-d.low52))*100)||50;rows.push({c:pos>70?'sell':pos<30?'buy':'hold',t:`ราคาที่ ${pos}% ของ 52-Week Range (${d.low52.toFixed(2)}–${d.high52.toFixed(2)})`});}
+  if(d.vwap){const diff=((p-d.vwap)/d.vwap*100);const abv=diff>=0;rows.push({c:abv?(diff>3?'sell':'hold'):(diff<-2?'buy':'hold'),t:`VWAP (20d): ${d.vwap.toFixed(2)} — ราคา${abv?'สูงกว่า':'ต่ำกว่า'} ${Math.abs(diff).toFixed(1)}% ${diff<-2?'✅ จุดเข้าดี':diff>3?'⚠️ แพงกว่าเฉลี่ย':''}`});}
   document.getElementById('analysisBox').innerHTML=rows.map(r=>`<div class="ab-row"><span class="ab-dot" style="background:var(--${r.c})"></span><span>${r.t}</span></div>`).join('');
 }
 
