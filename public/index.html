@@ -365,6 +365,7 @@ const STOCKS_DB = [
 
 let STOCKS = {};
 let watchlist = [];
+let portSet = new Set(); // tickers ที่มีใน port
 let curFilter = 'all', curPeriod = 'day', curTicker = null;
 let isFetching = false;
 const CACHE_KEY = 'set_v4', TTL = 5*60*1000;
@@ -374,9 +375,13 @@ const miniCharts = {};
 
 try { watchlist = JSON.parse(localStorage.getItem('set_wl_v4')) || ['PTT','KBANK','BDMS','SPALI']; }
 catch(e) { watchlist = ['PTT','KBANK','BDMS','SPALI']; }
-// ensure max 4 for dashboard
 if(watchlist.length > 8) watchlist = watchlist.slice(0,8);
 function saveWL(){ try{ localStorage.setItem('set_wl_v4', JSON.stringify(watchlist)); }catch(e){} }
+
+try { portSet = new Set(JSON.parse(localStorage.getItem('set_port_v1')) || []); }
+catch(e) { portSet = new Set(); }
+function savePort(){ try{ localStorage.setItem('set_port_v1', JSON.stringify([...portSet])); }catch(e){} }
+function togglePort(t){ if(portSet.has(t)) portSet.delete(t); else portSet.add(t); savePort(); renderWatchlistManage(); renderAll(); }
 
 async function apiFetch(ticker, range='6mo', interval='1d') {
   const url = `${API_BASE}/api/quote?ticker=${encodeURIComponent(ticker)}&range=${range}&interval=${interval}`;
@@ -540,6 +545,7 @@ async function fetchAll() {
   }
   saveCache(); setS('ok',`✅ ${fmtT(Date.now())} — ${done} ตัว`);
   isFetching=false; renderAll();
+  checkPortAlerts();
 }
 
 async function fetchOne(t){
@@ -673,13 +679,13 @@ function renderDashboard() {
         let entry,stop,target;
         const tk=tickSize(p);
         if(d.signal==='buy'){
-          const ev=calcEntry(d);
-          entry=ev.toFixed(2); stop=snapDown(ev-tk*3).toFixed(2); target=snapUp(p+tk*6).toFixed(2);
+          const e=calcEntry(d);
+          entry=e.v.toFixed(2); stop=snapDown(e.v-tk*3).toFixed(2); target=snapUp(p+tk*6).toFixed(2);
         } else if(d.signal==='sell'){
           entry=p.toFixed(2); stop=snapUp(p+tk*3).toFixed(2); target=snapDown(p-tk*6).toFixed(2);
         } else {
-          const ev=calcEntry(d);
-          entry=ev.toFixed(2); stop=snapDown(ev-tk*3).toFixed(2); target=snapUp(p+tk*4).toFixed(2);
+          const e=calcEntry(d);
+          entry=e.v.toFixed(2); stop=snapDown(e.v-tk*3).toFixed(2); target=snapUp(p+tk*4).toFixed(2);
         }
         return `<div class="wc-est">
           <div class="wc-est-col"><div class="est-label">เข้า</div><div class="est-val up">${entry}</div></div>
@@ -814,10 +820,42 @@ function tickSize(p){ return p<2?.01:p<5?.02:p<10?.05:p<25?.1:p<100?.25:p<200?.5
 function snapDown(p){ const t=tickSize(p); return +(Math.floor(p/t)*t).toFixed(t<.1?2:t<1?2:0); }
 function snapUp(p)  { const t=tickSize(p); return +(Math.ceil(p/t)*t).toFixed(t<.1?2:t<1?2:0); }
 function calcEntry(d){
-  // ราคาเข้าแนะนำ = EMA20 ถ้าต่ำกว่าราคา, ไม่งั้น -3 ticks จากราคาปัจจุบัน
   const p=d.price, t=tickSize(p);
-  const ema = d.ema20 && d.ema20 < p ? d.ema20 : p - t*3;
-  return snapDown(Math.min(ema, p - t)); // ต้องต่ำกว่าราคาเสมออย่างน้อย 1 tick
+  const candidates=[];
+
+  // 1. EMA20 — แนวรับเส้นค่าเฉลี่ย 20 วัน
+  if(d.ema20 && d.ema20 < p*0.999) candidates.push({v:d.ema20, src:'EMA20'});
+
+  // 2. EMA50 — แนวรับแข็งแกร่งกว่า ถ้าอยู่ต่ำกว่า EMA20
+  if(d.ema50 && d.ema50 < p*0.999) candidates.push({v:d.ema50, src:'EMA50'});
+
+  // 3. Bollinger Band ล่าง — โซน oversold
+  if(d.bb && d.bb.lower && d.bb.lower < p*0.999) candidates.push({v:d.bb.lower, src:'BB Lower'});
+
+  // 4. Local Support — หา swing low ใน 20 แท่งล่าสุด
+  if(d.candles && d.candles.length>=10){
+    const recent=d.candles.slice(-20);
+    const lows=recent.map(c=>c.low).filter(Boolean);
+    if(lows.length){
+      // หา local low ที่ต่ำกว่าราคาปัจจุบัน
+      const localLow=lows.reduce((a,b)=>b<p && b>p*0.85 ? Math.max(a,b) : a, 0);
+      if(localLow>0) candidates.push({v:localLow, src:'Support'});
+      // หา low สุดใน 10 แท่ง (short-term support)
+      const low10=Math.min(...d.candles.slice(-10).map(c=>c.low).filter(Boolean));
+      if(low10 < p*0.999 && low10 > p*0.85) candidates.push({v:low10, src:'Low10'});
+    }
+  }
+
+  // เลือก candidate ที่ใกล้ราคาปัจจุบันที่สุด (แต่ต่ำกว่าแน่ๆ)
+  const valid=candidates.filter(c=>c.v < p && c.v > p*0.80);
+  if(valid.length){
+    valid.sort((a,b)=>b.v-a.v);
+    const best=valid[0];
+    return {v:snapDown(best.v), src:best.src};
+  }
+
+  // fallback: ราคาปัจจุบัน - 3 ticks
+  return {v:snapDown(p - t*3), src:'−3 ticks'};
 }
 
 // ── List Card (scanner/picks/buy list) ──
@@ -827,9 +865,9 @@ function buildListCard(ticker, opts={}) {
   // calc entry price — ต่ำกว่าราคาปัจจุบัน เพื่อรอซื้อแนวรับ
   let entryTxt='—', stopTxt='—';
   if(d && sig==='buy'){
-    const ev=calcEntry(d), tk=tickSize(d.price);
-    entryTxt=ev.toFixed(2);
-    stopTxt=snapDown(ev-tk*3).toFixed(2);
+    const e=calcEntry(d), tk=tickSize(d.price);
+    entryTxt=e.v.toFixed(2);
+    stopTxt=snapDown(e.v-tk*3).toFixed(2);
   } else if(d && sig==='sell'){
     entryTxt='—'; stopTxt='—';
   }
@@ -837,7 +875,7 @@ function buildListCard(ticker, opts={}) {
   el.className='stock-card'; el.tabIndex=0;
   el.innerHTML=`
     <div class="sc-left">
-      <div class="sc-ticker">${ticker} <span class="badge b-${sig}" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px">${sig==='buy'?'ซื้อ':sig==='sell'?'ขาย':'ถือ'}</span></div>
+      <div class="sc-ticker">${ticker} <span class="badge b-${sig}" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px">${sig==='buy'?'ซื้อ':sig==='sell'?'ขาย':'ถือ'}</span>${portSet.has(ticker)?'<span style="font-size:9px;background:var(--accent);color:#000;padding:1px 5px;border-radius:10px;margin-left:4px;font-weight:700">PORT</span>':''}</div>
       <div class="sc-name">${m.n}</div>
       <div class="sc-dots" style="margin-top:3px">
         <span class="sdot" style="background:var(--${d?(d.rsi<40?'buy':d.rsi>60?'sell':'hold'):'hold'})" title="RSI"></span>
@@ -910,21 +948,34 @@ function renderWatchlistManage(){
   const div=document.getElementById('wlManageList'); div.innerHTML='';
   if(!watchlist.length){div.innerHTML='<div class="empty-msg">ยังไม่มีหุ้น — พิมพ์ ticker แล้วกด +</div>';return;}
   watchlist.forEach((t,i)=>{
+    const wrap=document.createElement('div');
+    wrap.style.cssText='padding:0 14px 4px';
+    // port toggle row
+    const portRow=document.createElement('label');
+    portRow.style.cssText='display:flex;align-items:center;gap:6px;padding:4px 0 2px;cursor:pointer;user-select:none';
+    const chk=document.createElement('input');
+    chk.type='checkbox'; chk.checked=portSet.has(t);
+    chk.style.cssText='width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0';
+    chk.onchange=()=>togglePort(t);
+    const lbl=document.createElement('span');
+    lbl.style.cssText='font-size:11px;color:var(--fg2)';
+    lbl.textContent=`${t} — มีใน Port แล้ว (แจ้งเตือนเมื่อถึงจุดเข้า/stop)`;
+    portRow.appendChild(chk); portRow.appendChild(lbl);
+    wrap.appendChild(portRow);
+
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:8px;touch-action:none';
-    // drag handle
     const handle=document.createElement('div');
     handle.innerHTML='⠿';
     handle.style.cssText='font-size:20px;color:var(--fg3);cursor:grab;padding:4px 6px;flex-shrink:0;user-select:none;-webkit-user-select:none';
     handle.title='ลากเพื่อเรียงลำดับ';
     const card=buildListCard(t,{rm:true});
-    card.style.flex='1';
-    card.style.minWidth='0';
-    row.appendChild(handle);
-    row.appendChild(card);
+    card.style.flex='1'; card.style.minWidth='0';
+    row.appendChild(handle); row.appendChild(card);
     row.dataset.idx=i;
     enableWLDrag(row, handle, i);
-    div.appendChild(row);
+    wrap.appendChild(row);
+    div.appendChild(wrap);
   });
 }
 
@@ -1032,9 +1083,19 @@ function fillDetail(ticker,d){
   sigEl.textContent=d.signal==='buy'?'🟢 สัญญาณซื้อ':d.signal==='sell'?'🔴 สัญญาณขาย':'🟡 ถือต่อ';
   sigEl.className=`sig-pill sp-${d.signal}`;
   let entry,stop,target,esub,ssub,tsub;
-  if(d.signal==='buy'){entry=p.toFixed(2);stop=(p*.97).toFixed(2);target=(p*1.06).toFixed(2);esub='ราคาปัจจุบัน';ssub='-3%';tsub='+6% (R:R 1:2)';}
-  else if(d.signal==='sell'){entry=p.toFixed(2);stop=(p*1.03).toFixed(2);target=(p*.94).toFixed(2);esub='ราคาปัจจุบัน';ssub='+3%';tsub='-6% (R:R 1:2)';}
-  else{entry=d.ema20?(d.ema20).toFixed(2):(p*.98).toFixed(2);stop=(p*.965).toFixed(2);target=(p*1.04).toFixed(2);esub='รอ Dip ถึง EMA20';ssub='-3.5%';tsub='+4%';}
+  const tk=tickSize(p);
+  if(d.signal==='buy'){
+    const e=calcEntry(d);
+    entry=e.v.toFixed(2); stop=snapDown(e.v-tk*3).toFixed(2); target=snapUp(p+tk*6).toFixed(2);
+    esub=`รอ Dip — ${e.src}`; ssub='Stop Loss'; tsub='Target';
+  } else if(d.signal==='sell'){
+    entry=p.toFixed(2); stop=snapUp(p+tk*3).toFixed(2); target=snapDown(p-tk*6).toFixed(2);
+    esub='ราคาปัจจุบัน'; ssub='Stop Loss'; tsub='Target';
+  } else {
+    const e=calcEntry(d);
+    entry=e.v.toFixed(2); stop=snapDown(e.v-tk*2).toFixed(2); target=snapUp(p+tk*4).toFixed(2);
+    esub=`รอ Dip — ${e.src}`; ssub='Stop Loss'; tsub='Target';
+  }
   ['ecEntry','ecStop','ecTarget'].forEach((id,i)=>{document.getElementById(id).textContent=[entry,stop,target][i];});
   ['ecEntrySub','ecStopSub','ecTargetSub'].forEach((id,i)=>{document.getElementById(id).textContent=[esub,ssub,tsub][i];});
   const rsiEl=document.getElementById('icRsi');
@@ -1164,6 +1225,51 @@ document.addEventListener('click',e=>{if(!e.target.closest('.search-wrap'))sd.st
 function pickSearch(t){si.value='';sd.style.display='none';if(!STOCKS_DB.find(s=>s.t===t))STOCKS_DB.push({t,n:t+' — SET'});openDetail(t);}
 
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500);}
+
+// ── Port Alerts ──
+function checkPortAlerts(){
+  if(!portSet.size) return;
+  const alerts=[];
+  portSet.forEach(t=>{
+    const d=STOCKS[t]; if(!d) return;
+    const p=d.price, tk=tickSize(p);
+    const e=calcEntry(d);
+    const stop=snapDown(e.v-tk*3);
+    if(p<=e.v) alerts.push({t,type:'entry',msg:`${t} ถึงจุดเข้าแนะนำ ${e.v.toFixed(2)} (${e.src}) แล้ว! ราคา ${p.toFixed(2)}`});
+    if(p<=stop) alerts.push({t,type:'stop',msg:`${t} ⚠️ ถึง Stop Loss ${stop.toFixed(2)}! ราคา ${p.toFixed(2)}`});
+  });
+  if(!alerts.length) return;
+  // แสดง banner ในแอพ
+  showAlertBanner(alerts);
+  // ขอ permission แล้วส่ง Web Notification
+  if('Notification' in window){
+    const send=()=>alerts.forEach(a=>{
+      try{ new Notification(a.type==='stop'?'⚠️ Stop Loss Alert':'🔔 จุดเข้า Alert',{body:a.msg,icon:'/icon.png'}); }catch(e){}
+    });
+    if(Notification.permission==='granted') send();
+    else if(Notification.permission!=='denied') Notification.requestPermission().then(p=>{ if(p==='granted') send(); });
+  }
+}
+
+function showAlertBanner(alerts){
+  let banner=document.getElementById('alert-banner');
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='alert-banner';
+    banner.style.cssText='position:fixed;top:60px;left:0;right:0;z-index:500;display:flex;flex-direction:column;gap:4px;padding:0 10px;pointer-events:none';
+    document.body.appendChild(banner);
+  }
+  banner.innerHTML='';
+  alerts.forEach(a=>{
+    const el=document.createElement('div');
+    el.style.cssText=`background:${a.type==='stop'?'var(--sell-bg)':'var(--buy-bg)'};border:1px solid ${a.type==='stop'?'var(--sell)':'var(--buy)'};border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;color:${a.type==='stop'?'var(--sell)':'var(--buy)'};pointer-events:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,.4)`;
+    el.innerHTML=`<span>${a.msg}</span><button onclick="this.parentElement.parentElement.removeChild(this.parentElement)" style="background:none;border:none;color:inherit;font-size:18px;cursor:pointer;padding:0 4px;line-height:1">×</button>`;
+    banner.appendChild(el);
+  });
+  // auto dismiss หลัง 12 วินาที
+  setTimeout(()=>{ try{banner.innerHTML='';}catch(e){} }, 12000);
+}
+
 window.addEventListener('online',()=>fetchAll());
 window.addEventListener('offline',()=>setS('err','📴 Offline'));
 
