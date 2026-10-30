@@ -750,36 +750,40 @@ function renderAll(){
 
 // ── Signal Engine (คำนวณจาก indicator ที่เปิดเท่านั้น) ──
 function calcSignal({rsi,macdHist,macdHistPrev,emaPos,bb,price,stTrend,volScore}){
-  let score=0, activeCount=0;
+  let score=0, maxScore=0;
+  // แต่ละ indicator มี max ±2 ยกเว้น EMA ±1
   if(indSettings.rsi){
-    activeCount++;
+    maxScore+=2;
     if(rsi<35)score+=2;else if(rsi<50)score+=1;else if(rsi>65)score-=2;else if(rsi>55)score-=1;
   }
   if(indSettings.macd){
-    activeCount++;
+    maxScore+=2;
     if(macdHist>0&&macdHist>macdHistPrev)score+=2;else if(macdHist>0)score+=1;
     else if(macdHist<0&&macdHist<macdHistPrev)score-=2;else if(macdHist<0)score-=1;
   }
   if(indSettings.ema){
-    activeCount++;
-    if(emaPos==='above')score+=1;else if(emaPos==='below')score-=1;
+    maxScore+=2;
+    if(emaPos==='above')score+=2;else if(emaPos==='below')score-=2;
   }
   if(indSettings.vol && volScore!==undefined){
-    activeCount++;
-    score+=volScore;
+    maxScore+=2; score+=volScore;
   }
   if(indSettings.bb && bb){
-    activeCount++;
+    maxScore+=2;
     if(price<=bb.lower)score+=2;else if(price<bb.mid)score+=1;
     else if(price>=bb.upper)score-=2;else if(price>bb.mid)score-=1;
   }
   if(indSettings.st && stTrend!==undefined){
-    activeCount++;
+    maxScore+=2;
     if(stTrend===1)score+=2;else score-=2;
   }
-  if(activeCount===0) return 'hold';
-  const thresh = sigThreshold;
-  return score>=thresh?'buy':score<=-thresh?'sell':'hold';
+  if(maxScore===0) return 'hold';
+
+  // normalize เป็น % ของ max score
+  const pct = score / maxScore; // -1.0 ถึง +1.0
+  // threshold 1=ไว(30%), 2=ปกติ(50%), 3=เข้มงวด(70%)
+  const threshPct = sigThreshold===1 ? 0.30 : sigThreshold===3 ? 0.70 : 0.50;
+  return pct>=threshPct?'buy':pct<=-threshPct?'sell':'hold';
 }
 
 // ── Settings UI ──
@@ -812,7 +816,7 @@ function renderSettings(){
     const btn=document.getElementById(`thresh-${v}`);
     if(btn) btn.classList.toggle('active', sigThreshold===v);
   });
-  const descs={1:'สัญญาณไวขึ้น อาจ noise มากกว่า',2:'สมดุล (แนะนำ)',3:'เข้มงวด สัญญาณน้อยลงแต่แม่นขึ้น'};
+  const descs={1:'ไว — indicators ≥30% เห็นด้วย → ซื้อ/ขาย',2:'ปกติ — indicators ≥50% เห็นด้วย → ซื้อ/ขาย',3:'เข้มงวด — indicators ≥70% เห็นด้วยจึงสัญญาณ'};
   const td=document.getElementById('threshDesc');
   if(td) td.textContent=descs[sigThreshold]||'';
 }
