@@ -275,7 +275,13 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
     <div class="detail-hdr">
       <div class="dh-top">
         <div><div class="dh-ticker" id="dhTicker">—</div><div class="dh-name" id="dhName">—</div></div>
-        <div><div class="dh-price" id="dhPrice">—</div><div class="dh-chg" id="dhChg">—</div></div>
+        <div style="text-align:right">
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+            <span id="dhPortBadge" style="display:none;font-size:11px;font-weight:700;background:#1a4d2e;color:#4ade80;border:1px solid #4ade80;padding:2px 8px;border-radius:20px;letter-spacing:.04em">● PORT</span>
+            <div class="dh-price" id="dhPrice">—</div>
+          </div>
+          <div class="dh-chg" id="dhChg">—</div>
+        </div>
       </div>
       <div class="dh-sig-row">
         <span class="sig-pill sp-hold" id="dhSig">—</span>
@@ -644,7 +650,10 @@ function renderDashboard() {
         </div>
         <div class="wc-name">${m.n}</div>
         ${d ? `
-          <div class="wc-price ${cc(d.chg)}">${fmtP(d.price)}</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${portSet.has(ticker)?'<span style="font-size:10px;font-weight:700;background:#1a4d2e;color:#4ade80;border:1px solid #4ade80;padding:1px 7px;border-radius:20px;letter-spacing:.03em">● PORT</span>':''}
+            <div class="wc-price ${cc(d.chg)}">${fmtP(d.price)}</div>
+          </div>
           <div class="wc-chg ${cc(d.chg)}">${fmtC(d.chg,d.pct)}</div>
         ` : `
           <div class="wc-price"><span class="skel" style="width:70px;height:22px;display:inline-block"></span></div>
@@ -846,16 +855,17 @@ function calcEntry(d){
     }
   }
 
-  // เลือก candidate ที่ใกล้ราคาปัจจุบันที่สุด (แต่ต่ำกว่าแน่ๆ)
+  // เลือก candidate ที่ต่ำสุด = support แท้จริง R:R ดีกว่า
+  // กรอง: ต้องต่ำกว่าราคา แต่ไม่ไกลเกิน 20% (ไม่สมเหตุสมผล)
   const valid=candidates.filter(c=>c.v < p && c.v > p*0.80);
   if(valid.length){
-    valid.sort((a,b)=>b.v-a.v);
+    valid.sort((a,b)=>a.v-b.v); // เรียงต่ำสุดขึ้นมา
     const best=valid[0];
     return {v:snapDown(best.v), src:best.src};
   }
 
-  // fallback: ราคาปัจจุบัน - 3 ticks
-  return {v:snapDown(p - t*3), src:'−3 ticks'};
+  // fallback: ราคาปัจจุบัน - 5 ticks (ลึกกว่าเดิม)
+  return {v:snapDown(p - t*5), src:'−5 ticks'};
 }
 
 // ── List Card (scanner/picks/buy list) ──
@@ -1074,6 +1084,8 @@ function setDetailLoading(){
 
 function fillDetail(ticker,d){
   const p=d.price;
+  const portBadge=document.getElementById('dhPortBadge');
+  if(portBadge) portBadge.style.display=portSet.has(ticker)?'inline-flex':'none';
   document.getElementById('dhPrice').textContent=fmtP(p);
   document.getElementById('dhPrice').className=`dh-price ${cc(d.chg)}`;
   document.getElementById('dhChg').textContent=fmtC(d.chg,d.pct);
