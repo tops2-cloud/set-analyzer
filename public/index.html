@@ -462,6 +462,14 @@ function calcBB(arr, p=20, mult=2){
   }
   return out;
 }
+function calcATR(highs, lows, closes, p=14){
+  if(closes.length<p+1) return null;
+  const tr=closes.map((c,i)=>i===0?highs[i]-lows[i]:Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1])));
+  // Wilder smoothing (RMA)
+  let atr=tr.slice(1,p+1).reduce((a,b)=>a+b,0)/p;
+  for(let i=p+1;i<tr.length;i++) atr=(atr*(p-1)+tr[i])/p;
+  return +atr.toFixed(4);
+}
 function calcSupertrend(highs, lows, closes, atrPeriod=10, mult=3){
   // ATR
   const tr=closes.map((c,i)=>i===0?0:Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1])));
@@ -539,6 +547,8 @@ async function processStock(ticker, data) {
   const bb=bbArr[bbArr.length-1]||null;
   // Supertrend
   const stTrend=closes.length>12?calcSupertrend(highs,lows,closes):1;
+  // ATR (14)
+  const atr=closes.length>15?calcATR(highs,lows,closes,14):null;
   // Vol score
   const rawVols=(q.volume||[]).map(Number);
   const volScore=calcVolScore(rawVols, closes);
@@ -554,7 +564,7 @@ async function processStock(ticker, data) {
   const vwap=calcVWAP(candles, volumes);
 
   const signal=calcSignal({rsi,macdHist,macdHistPrev:histPrev,emaPos,bb,price,stTrend,volScore,vwap});
-  return{price,chg,pct,high52,low52,rsi,macdHist,macdHistPrev:histPrev,ema20,ema50,emaPos,bb,stTrend,volScore,vwap,signal,candles,volumes,ts:Date.now()};
+  return{price,chg,pct,high52,low52,rsi,macdHist,macdHistPrev:histPrev,ema20,ema50,emaPos,bb,stTrend,volScore,vwap,atr,signal,candles,volumes,ts:Date.now()};
 }
 
 // ── Fetch ──
@@ -719,6 +729,12 @@ function renderDashboard() {
           <div class="ip-label">EMA</div>
           <div class="ip-val ${d?(d.emaPos==='above'?'up':d.emaPos==='below'?'dn':'neu'):''}">
             ${d ? (d.emaPos==='above'?'↑':d.emaPos==='below'?'↓':'~') : '—'}
+          </div>
+        </div>
+        <div class="ind-pill">
+          <div class="ip-label">52W</div>
+          <div class="ip-val ${d&&d.low52?(((d.price-d.low52)/d.low52*100)<20?'up':((d.price-d.low52)/d.low52*100)>60?'dn':'neu'):''}">
+            ${d&&d.low52 ? '+'+((d.price-d.low52)/d.low52*100).toFixed(0)+'%' : '—'}
           </div>
         </div>
       </div>
@@ -975,6 +991,18 @@ function renderScanner(){
   else if(f==='rsi-os') tickers=tickers.filter(t=>STOCKS[t]?.rsi<35);
   else if(f==='rsi-ob') tickers=tickers.filter(t=>STOCKS[t]?.rsi>65);
   else if(f==='macd-bull') tickers=tickers.filter(t=>STOCKS[t]?.macdHist>0);
+  // sort: buy→hold→sell, ภายใน buy เรียง RSI ต่ำสุด (oversold) ก่อน
+  const sigOrder={'buy':0,'hold':1,'sell':2};
+  tickers.sort((a,b)=>{
+    const da=STOCKS[a], db=STOCKS[b];
+    if(!da&&!db) return 0; if(!da) return 1; if(!db) return -1;
+    const so=(sigOrder[da.signal]??1)-(sigOrder[db.signal]??1);
+    if(so!==0) return so;
+    // ภายใน signal เดียวกัน: buy→rsi ต่ำก่อน, sell→rsi สูงก่อน
+    if(da.signal==='buy') return (da.rsi||50)-(db.rsi||50);
+    if(da.signal==='sell') return (db.rsi||50)-(da.rsi||50);
+    return 0;
+  });
   document.getElementById('scanCnt').textContent=tickers.length;
   if(!tickers.length){list.innerHTML='<div class="empty-msg">ไม่พบหุ้นตามเงื่อนไข</div>';return;}
   tickers.forEach(t=>list.appendChild(buildListCard(t)));
@@ -1188,17 +1216,25 @@ function fillDetail(ticker,d){
   sigEl.className=`sig-pill sp-${d.signal}`;
   let entry,stop,target,esub,ssub,tsub;
   const tk=tickSize(p);
+  // ATR stop: ใช้ 1.5×ATR ถ้ามีข้อมูล ไม่งั้น fallback fixed ticks
+  const atrStop = d.atr ? d.atr*1.5 : tk*3;
+  const atrSub = d.atr ? `ATR×1.5 (${d.atr.toFixed(3)})` : 'Fixed ticks';
   if(d.signal==='buy'){
     const e=calcEntry(d);
-    entry=e.v.toFixed(2); stop=snapDown(e.v-tk*3).toFixed(2); target=snapUp(p+tk*6).toFixed(2);
-    esub=`รอ Dip — ${e.src}`; ssub='Stop Loss'; tsub='Target';
+    const stopVal=snapDown(e.v-atrStop);
+    const rr=((p-stopVal)>0)?((snapUp(p+atrStop*2)-p)/(p-stopVal)).toFixed(1):'—';
+    entry=e.v.toFixed(2); stop=stopVal.toFixed(2); target=snapUp(e.v+atrStop*2).toFixed(2);
+    esub=`รอ Dip — ${e.src}`; ssub=atrSub; tsub=`R:R ≈ 1:${rr}`;
   } else if(d.signal==='sell'){
-    entry=p.toFixed(2); stop=snapUp(p+tk*3).toFixed(2); target=snapDown(p-tk*6).toFixed(2);
-    esub='ราคาปัจจุบัน'; ssub='Stop Loss'; tsub='Target';
+    const stopVal=snapUp(p+atrStop);
+    entry=p.toFixed(2); stop=stopVal.toFixed(2); target=snapDown(p-atrStop*2).toFixed(2);
+    esub='ราคาปัจจุบัน'; ssub=atrSub; tsub='Target';
   } else {
     const e=calcEntry(d);
-    entry=e.v.toFixed(2); stop=snapDown(e.v-tk*2).toFixed(2); target=snapUp(p+tk*4).toFixed(2);
-    esub=`รอ Dip — ${e.src}`; ssub='Stop Loss'; tsub='Target';
+    const stopVal=snapDown(e.v-atrStop);
+    const rr=((p-stopVal)>0)?((snapUp(p+atrStop*2)-p)/(p-stopVal)).toFixed(1):'—';
+    entry=e.v.toFixed(2); stop=stopVal.toFixed(2); target=snapUp(e.v+atrStop*2).toFixed(2);
+    esub=`รอ Dip — ${e.src}`; ssub=atrSub; tsub=`R:R ≈ 1:${rr}`;
   }
   ['ecEntry','ecStop','ecTarget'].forEach((id,i)=>{document.getElementById(id).textContent=[entry,stop,target][i];});
   ['ecEntrySub','ecStopSub','ecTargetSub'].forEach((id,i)=>{document.getElementById(id).textContent=[esub,ssub,tsub][i];});
