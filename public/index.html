@@ -302,6 +302,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
       <div id="chartContainer"><div class="chart-loading" id="chartLoading">กำลังโหลด…</div></div>
       <div class="chart-ohlc" id="chartOHLC">O:— H:— L:— C:—</div>
     </div>
+    <div id="dhPlBox" style="display:none"></div>
     <div class="entry-card">
       <div class="ec-title">จุดเข้า / ออก (แนะนำ)</div>
       <div class="ec-rows">
@@ -388,6 +389,24 @@ try { portSet = new Set(JSON.parse(localStorage.getItem('set_port_v1')) || []); 
 catch(e) { portSet = new Set(); }
 function savePort(){ try{ localStorage.setItem('set_port_v1', JSON.stringify([...portSet])); }catch(e){} }
 function togglePort(t){ if(portSet.has(t)) portSet.delete(t); else portSet.add(t); savePort(); renderWatchlistManage(); renderAll(); }
+
+// portData: {ticker: {cost: number, qty: number}}
+let portData = {};
+try { portData = JSON.parse(localStorage.getItem('set_portdata_v1')) || {}; }
+catch(e) { portData = {}; }
+function savePortData(){ try{ localStorage.setItem('set_portdata_v1', JSON.stringify(portData)); }catch(e){} }
+function setPortData(t, cost, qty){
+  if(cost>0 && qty>0) portData[t]={cost:+cost, qty:+qty};
+  else delete portData[t];
+  savePortData(); renderWatchlistManage(); renderAll();
+}
+function getPortPL(t){
+  const d=portData[t]; if(!d) return null;
+  const s=STOCKS[t]; if(!s||!s.price) return null;
+  const pl=((s.price-d.cost)/d.cost)*100;
+  const plBaht=(s.price-d.cost)*d.qty;
+  return {pl:+pl.toFixed(2), plBaht:+plBaht.toFixed(0), cost:d.cost, qty:d.qty, val:+(s.price*d.qty).toFixed(0)};
+}
 
 async function apiFetch(ticker, range='6mo', interval='1d') {
   const url = `${API_BASE}/api/quote?ticker=${encodeURIComponent(ticker)}&range=${range}&interval=${interval}`;
@@ -668,7 +687,12 @@ function renderDashboard() {
         ${d ? `
           <div style="display:flex;align-items:center;justify-content:space-between">
             <div class="wc-price ${cc(d.chg)}">${fmtP(d.price)}</div>
-            ${portSet.has(ticker)?'<span style="font-size:8px;font-weight:700;background:#1a4d2e;color:#4ade80;border:1px solid #4ade80;padding:1px 5px;border-radius:20px;letter-spacing:.03em;flex-shrink:0">PORT</span>':''}
+            ${(()=>{ if(!portSet.has(ticker)) return '';
+              const pl=getPortPL(ticker);
+              if(!pl) return '<span style="font-size:8px;font-weight:700;background:#1a4d2e;color:#4ade80;border:1px solid #4ade80;padding:1px 5px;border-radius:20px;letter-spacing:.03em;flex-shrink:0">PORT</span>';
+              const col=pl.pl>=0?'#4ade80':'#f85149'; const bg=pl.pl>=0?'#1a4d2e':'#2d0f0f';
+              return `<span style="font-size:8px;font-weight:700;background:${bg};color:${col};border:1px solid ${col};padding:1px 6px;border-radius:20px;letter-spacing:.03em;flex-shrink:0">${pl.pl>=0?'+':''}${pl.pl}%</span>`;
+            })()}
           </div>
           <div class="wc-chg ${cc(d.chg)}">${fmtC(d.chg,d.pct)}</div>
         ` : `
@@ -999,12 +1023,26 @@ function renderWatchlistManage(){
     const chk=document.createElement('input');
     chk.type='checkbox'; chk.checked=portSet.has(t);
     chk.style.cssText='width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0';
-    chk.onchange=()=>togglePort(t);
+    chk.onchange=()=>{ togglePort(t); };
     const lbl=document.createElement('span');
     lbl.style.cssText='font-size:11px;color:var(--fg2)';
-    lbl.textContent=`${t} — มีใน Port แล้ว (แจ้งเตือนเมื่อถึงจุดเข้า/stop)`;
+    lbl.textContent='มีใน Port';
     portRow.appendChild(chk); portRow.appendChild(lbl);
     wrap.appendChild(portRow);
+    // cost/qty input row (แสดงเฉพาะเมื่อติ๊ก port)
+    const costRow=document.createElement('div');
+    costRow.style.cssText=`display:${portSet.has(t)?'flex':'none'};align-items:center;gap:6px;padding:2px 0 6px 22px;flex-wrap:wrap`;
+    const pd=portData[t]||{};
+    costRow.innerHTML=`<span style="font-size:10px;color:var(--fg3);flex-shrink:0">ต้นทุน/หุ้น:</span>
+      <input id="cost_${t}" type="number" step="0.01" min="0" placeholder="เช่น 18.90" value="${pd.cost||''}"
+        style="width:90px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 7px;color:var(--fg);font-size:12px;font-family:inherit;outline:none">
+      <span style="font-size:10px;color:var(--fg3);flex-shrink:0">จำนวน:</span>
+      <input id="qty_${t}" type="number" step="1" min="0" placeholder="เช่น 3000" value="${pd.qty||''}"
+        style="width:80px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 7px;color:var(--fg);font-size:12px;font-family:inherit;outline:none">
+      <button onclick="setPortData('${t}',document.getElementById('cost_${t}').value,document.getElementById('qty_${t}').value)"
+        style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">บันทึก</button>`;
+    chk.onchange=()=>{ togglePort(t); };
+    wrap.appendChild(costRow);
 
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:8px;touch-action:none';
@@ -1119,6 +1157,28 @@ function fillDetail(ticker,d){
   const p=d.price;
   const portBadge=document.getElementById('dhPortBadge');
   if(portBadge) portBadge.style.display=portSet.has(ticker)?'inline-flex':'none';
+  // PORT P/L box
+  const plBox=document.getElementById('dhPlBox');
+  if(plBox){
+    const pl=getPortPL(ticker);
+    if(pl){
+      const col=pl.pl>=0?'var(--buy)':'var(--sell)';
+      const bg=pl.pl>=0?'var(--buy-bg)':'var(--sell-bg)';
+      plBox.style.display='block';
+      plBox.innerHTML=`<div style="background:${bg};border:1px solid ${col};border-radius:10px;padding:10px 14px;margin:8px 14px 0">
+        <div style="font-size:10px;color:var(--fg3);margin-bottom:6px;font-weight:600;letter-spacing:.05em">📊 PORT TRACKER</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
+          <div><div style="font-size:9px;color:var(--fg3)">ต้นทุน/หุ้น</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--fg)">${pl.cost.toFixed(2)}</div></div>
+          <div><div style="font-size:9px;color:var(--fg3)">จำนวน</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--fg)">${pl.qty.toLocaleString()}</div></div>
+          <div><div style="font-size:9px;color:var(--fg3)">กำไร/ขาดทุน</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:${col}">${pl.pl>=0?'+':''}${pl.pl}%</div></div>
+        </div>
+        <div style="margin-top:8px;border-top:1px solid ${col};padding-top:8px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:11px;color:var(--fg2)">มูลค่าตลาด <b style="color:var(--fg)">${pl.val.toLocaleString()} ฿</b></span>
+          <span style="font-size:11px;color:${col};font-weight:700">${pl.plBaht>=0?'+':''}${pl.plBaht.toLocaleString()} ฿</span>
+        </div>
+      </div>`;
+    } else { plBox.style.display='none'; }
+  }
   document.getElementById('dhPrice').textContent=fmtP(p);
   document.getElementById('dhPrice').className=`dh-price ${cc(d.chg)}`;
   document.getElementById('dhChg').textContent=fmtC(d.chg,d.pct);
