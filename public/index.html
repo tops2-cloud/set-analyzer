@@ -290,8 +290,7 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
     </div>
     <div class="chart-wrap">
       <div class="chart-tb">
-        <button class="cperiod active" onclick="setCP(this,'1mo','1d')">1M</button>
-        <button class="cperiod" onclick="setCP(this,'3mo','1d')">3M</button>
+        <button class="cperiod active" onclick="setCP(this,'3mo','1d')">3M</button>
         <button class="cperiod" onclick="setCP(this,'6mo','1d')">6M</button>
         <button class="cperiod" onclick="setCP(this,'1y','1wk')">1Y</button>
         <div class="chart-legend">
@@ -1142,7 +1141,7 @@ async function openDetail(ticker){
   document.getElementById('tvLink').href=`https://www.tradingview.com/chart/?symbol=SET%3A${ticker}`;
   goPanel('detail');
   document.querySelectorAll('.cperiod').forEach((b,i)=>b.classList.toggle('active',i===0));
-  loadDetailChart(ticker,'1mo','1d');
+  loadDetailChart(ticker,'3mo','1d');
   let d=STOCKS[ticker];
   if(!d){setDetailLoading();d=await fetchOne(ticker);}
   if(d) fillDetail(ticker,d);
