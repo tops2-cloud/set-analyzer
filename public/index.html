@@ -167,10 +167,15 @@ main{padding-bottom:calc(60px + env(safe-area-inset-bottom,0))}
 .ic-label{font-size:11px;font-weight:600;color:var(--fg2);text-transform:uppercase;letter-spacing:.04em}
 .ic-val{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:700;margin-top:4px}
 .ic-sig{font-size:11px;font-weight:500;color:var(--fg);margin-top:3px}
-.analysis-box{margin:0 14px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px}
-.ab-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:13px}
-.ab-row:last-child{margin-bottom:0}
-.ab-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.analysis-box{margin:0 14px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.an-title{padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--bg3);color:var(--fg);border-bottom:1px solid var(--border)}
+.ab-row{display:flex;align-items:flex-start;gap:8px;padding:5px 14px;font-size:12px;font-weight:500;border-bottom:1px solid var(--border)}
+.ab-row:last-of-type{border-bottom:none}
+.ab-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.an-final{padding:10px 14px;font-size:13px;font-weight:700;border-top:2px solid var(--border)}
+.an-buy{background:var(--buy-bg);color:var(--buy);border-color:var(--buy)!important}
+.an-sell{background:var(--sell-bg);color:var(--sell);border-color:var(--sell)!important}
+.an-hold{background:var(--hold-bg);color:var(--hold);border-color:var(--hold)!important}
 .tv-btn{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 14px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--fg2);text-decoration:none;padding:11px;font-size:13px;font-family:inherit}
 .tv-btn:hover{border-color:var(--accent);color:var(--accent)}
 
@@ -491,6 +496,135 @@ function calcSupertrend(highs, lows, closes, atrPeriod=10, mult=3){
   }
   return trend[trend.length-1]; // 1 = uptrend, -1 = downtrend
 }
+// ── Swing High/Low detection ──
+function calcSwings(highs, lows, lb=5){
+  const sh=[], sl=[];
+  for(let i=lb;i<highs.length-lb;i++){
+    const h=highs[i];
+    if(highs.slice(i-lb,i).every(v=>v<=h) && highs.slice(i+1,i+lb+1).every(v=>v<=h))
+      sh.push({i, v:+h.toFixed(2)});
+  }
+  for(let i=lb;i<lows.length-lb;i++){
+    const l=lows[i];
+    if(lows.slice(i-lb,i).every(v=>v>=l) && lows.slice(i+1,i+lb+1).every(v=>v>=l))
+      sl.push({i, v:+l.toFixed(2)});
+  }
+  return{highs:sh.slice(-6), lows:sl.slice(-6)};
+}
+
+// ── Support/Resistance from swing clusters ──
+function calcSRLevels(swings, price){
+  const tol=price*0.015; // 1.5% cluster tolerance
+  const cluster=(pts)=>{
+    const groups=[];
+    pts.forEach(p=>{
+      const g=groups.find(g=>Math.abs(g.v-p.v)<=tol);
+      if(g){g.v=(g.v*g.n+p.v)/(g.n+1);g.n++;}
+      else groups.push({v:+p.v.toFixed(2),n:1});
+    });
+    return groups.sort((a,b)=>b.n-a.n).slice(0,3);
+  };
+  const sup=cluster(swings.lows).filter(g=>g.v<price).sort((a,b)=>b.v-a.v);
+  const res=cluster(swings.highs).filter(g=>g.v>price).sort((a,b)=>a.v-b.v);
+  return{
+    immediateSup: sup[0]||null,
+    majorSup:     sup[1]||null,
+    immediateRes: res[0]||null,
+    majorRes:     res[1]||null,
+  };
+}
+
+// ── Deep Analysis (framework-based) ──
+function buildAnalysis(ticker, d){
+  const p=d.price, atr=d.atr||0;
+  const sr=d.srLevels||{};
+  const rows=[];
+
+  // ── 1. Trend ──
+  let trendLabel='Sideways', trendCol='hold';
+  const aboveEma20=p>d.ema20, aboveEma50=p>d.ema50;
+  const aboveEma200=d.ema200?p>d.ema200:null;
+  const macdBull=d.macdHist>0 && d.macdHist>d.macdHistPrev;
+  const macdBear=d.macdHist<0 && d.macdHist<d.macdHistPrev;
+  if(aboveEma20&&aboveEma50&&macdBull){ trendLabel='Bullish'; trendCol='buy'; }
+  else if(!aboveEma20&&!aboveEma50&&macdBear){ trendLabel='Bearish'; trendCol='sell'; }
+  else if(aboveEma20&&!aboveEma50){ trendLabel='Rebound in Downtrend'; trendCol='hold'; }
+  rows.push({c:trendCol, t:`📈 Trend: ${trendLabel} — EMA20:${aboveEma20?'↑':'↓'} EMA50:${aboveEma50?'↑':'↓'}${aboveEma200!==null?' EMA200:'+( aboveEma200?'↑':'↓'):''}`});
+
+  // ── 2. EMA Stack ──
+  const e12=d.ema12?.toFixed(2), e26=d.ema26?.toFixed(2), e50=d.ema50?.toFixed(2), e200=d.ema200?.toFixed(2)||'N/A';
+  const goldCross=d.ema12&&d.ema26&&d.ema12>d.ema26;
+  rows.push({c:goldCross?'buy':'sell', t:`EMA Stack — 12:${e12} / 26:${e26} / 50:${e50} / 200:${e200} ${goldCross?'✅ Golden Cross':'⚠️ Death Cross'}`});
+
+  // ── 3. MACD ──
+  const macdTxt=d.macdHist>=0?`+${d.macdHist.toFixed(4)}`:`${d.macdHist.toFixed(4)}`;
+  rows.push({c:macdBull?'buy':macdBear?'sell':'hold', t:`MACD Histogram: ${macdTxt} ${macdBull?'📶 Bullish Momentum':macdBear?'📉 Bearish Momentum':'→ Momentum อ่อน'}`});
+
+  // ── 4. RSI ──
+  const rsiTxt=d.rsi<30?'⚡ Oversold':d.rsi<40?'Near Oversold':d.rsi>70?'⚠️ Overbought':d.rsi>60?'Near Overbought':'Neutral';
+  rows.push({c:d.rsi<40?'buy':d.rsi>60?'sell':'hold', t:`RSI(14): ${d.rsi.toFixed(1)} — ${rsiTxt}`});
+
+  // ── 5. Support / Resistance ──
+  if(sr.immediateSup) rows.push({c:'buy',  t:`🟢 Immediate Support: ${sr.immediateSup.v.toFixed(2)} (${sr.immediateSup.n} swing${sr.immediateSup.n>1?'s':''})`});
+  if(sr.majorSup)     rows.push({c:'buy',  t:`🟢 Major Support: ${sr.majorSup.v.toFixed(2)}`});
+  if(sr.immediateRes) rows.push({c:'sell', t:`🔴 Immediate Resistance: ${sr.immediateRes.v.toFixed(2)} (${sr.immediateRes.n} swing${sr.immediateRes.n>1?'s':''})`});
+  if(sr.majorRes)     rows.push({c:'sell', t:`🔴 Major Resistance: ${sr.majorRes.v.toFixed(2)}`});
+  if(!sr.immediateSup&&!sr.majorSup) rows.push({c:'hold', t:'⚠️ Support: ไม่พบ Swing Low ที่ชัดเจนใน 6M'});
+  if(!sr.immediateRes&&!sr.majorRes) rows.push({c:'hold', t:'⚠️ Resistance: ไม่พบ Swing High ที่ชัดเจนใน 6M'});
+
+  // ── 6. ATR / Volatility ──
+  if(atr){
+    const atrPct=(atr/p*100).toFixed(1);
+    const vol=atrPct>3?'สูง ⚡':atrPct>1.5?'ปานกลาง':'ต่ำ';
+    rows.push({c:'hold', t:`ATR(14): ${atr.toFixed(3)} (${atrPct}% ของราคา) — Volatility ${vol}`});
+  }
+
+  // ── 7. Volume ──
+  if(d.volScore>0)  rows.push({c:'buy',  t:'📦 Volume ยืนยัน — ปริมาณสูงกว่าค่าเฉลี่ยและราคาขึ้น'});
+  else if(d.volScore<0) rows.push({c:'sell', t:'📦 Volume แจ้งเตือน — ปริมาณสูงแต่ราคาลง (Distribution)'});
+  else rows.push({c:'hold', t:'📦 Volume ปกติ — ไม่มีสัญญาณพิเศษ'});
+
+  // ── 8. VWAP ──
+  if(d.vwap){
+    const vd=((p-d.vwap)/d.vwap*100);
+    rows.push({c:vd<-2?'buy':vd>3?'sell':'hold', t:`VWAP(20d): ${d.vwap.toFixed(2)} — ราคา${vd>=0?'สูง':'ต่ำ'}กว่า ${Math.abs(vd).toFixed(1)}% ${vd<-2?'✅ จุดเข้าดี':vd>3?'⚠️ แพงกว่าเฉลี่ย':''}`});
+  }
+
+  // ── 9. 3 Scenarios ──
+  const nearRes=sr.immediateRes?.v||snapUp(p*1.05);
+  const nearSup=sr.immediateSup?.v||snapDown(p*0.95);
+  const majSup=sr.majorSup?.v||snapDown(p*0.90);
+  rows.push({c:'buy',  t:`🐂 Bull Case: ทะลุ ${nearRes.toFixed(2)} + Volume ยืนยัน → เป้า ${(nearRes+(atr||p*0.02)*3).toFixed(2)}`});
+  rows.push({c:'hold', t:`📊 Base Case: แกว่งระหว่าง ${nearSup.toFixed(2)}–${nearRes.toFixed(2)} รอสัญญาณชัดขึ้น`});
+  rows.push({c:'sell', t:`🐻 Bear Case: หลุด ${nearSup.toFixed(2)} → แนวรับถัดไป ${majSup.toFixed(2)} ยกเลิกแผน`});
+
+  // ── 10. Devil's Advocate ──
+  const devils=[];
+  if(d.rsi>60 && sr.immediateRes && p>(sr.immediateRes.v*0.98)) devils.push('กำลังซื้อใกล้แนวต้าน RSI>60');
+  if(d.volScore<=0 && macdBull) devils.push('MACD Bullish แต่ Volume ไม่ยืนยัน');
+  if(aboveEma20&&!aboveEma50) devils.push('Rebound — ยังต่ำกว่า EMA50 แนวโน้มหลักยังเป็น Downtrend');
+  if(d.ema200&&!aboveEma200) devils.push('ราคาต่ำกว่า EMA200 — Long-term Bearish');
+  if(d.rsi<35 && macdBear) devils.push('RSI Oversold แต่ MACD ยังลง อาจยังไม่กลับตัว');
+  if(devils.length) rows.push({c:'sell', t:`⚡ Devil's Advocate: ${devils.join(' / ')}`});
+
+  // ── 11. Final Decision ──
+  let decision='WAIT', decCol='hold', decDesc='รอสัญญาณยืนยันเพิ่ม';
+  const bullCount=rows.filter(r=>r.c==='buy').length;
+  const bearCount=rows.filter(r=>r.c==='sell').length;
+  if(d.signal==='buy' && bullCount>=4 && d.rsi<55 && aboveEma20){
+    decision='BUY_CANDIDATE'; decCol='buy'; decDesc=`จุดเข้า: ${nearSup.toFixed(2)}–${p.toFixed(2)} Stop: ${(nearSup-(atr||p*0.02)).toFixed(2)}`;
+  } else if(d.signal==='sell' || (bearCount>=4 && !aboveEma20)){
+    decision='REDUCE_RISK'; decCol='sell'; decDesc=`หลุด ${nearSup.toFixed(2)} ให้ตัด`;
+  } else if(d.signal==='buy' && d.rsi>60){
+    decision='WAIT'; decCol='hold'; decDesc='Overbought รอ Pullback ก่อน';
+  } else if(d.signal==='buy'){
+    decision='HOLD'; decCol='buy'; decDesc='แนวโน้มยังดี รักษา position';
+  }
+  rows.push({c:decCol, t:`🎯 Final: ${decision} — ${decDesc} [ความเชื่อมั่น: ${bullCount>=5||bearCount>=5?'HIGH':bullCount>=3||bearCount>=3?'MEDIUM':'LOW'}]`});
+
+  return rows;
+}
+
 function calcVWAP(candles, volumes){
   // VWAP = sum(typical_price * volume) / sum(volume) สำหรับ N วันล่าสุด
   if(!candles||candles.length<5||!volumes||volumes.length<5) return null;
@@ -539,8 +673,12 @@ async function processStock(ticker, data) {
   const rsi=calcRSI(closes);
   const{hist,histPrev}=calcMACD(closes);
   const macdHist=hist[hist.length-1]||0;
+  const ema12arr=calcEMA(closes,12),ema26arr=calcEMA(closes,26);
   const ema20arr=calcEMA(closes,20),ema50arr=calcEMA(closes,50);
+  const ema200arr=closes.length>=200?calcEMA(closes,200):null;
+  const ema12=ema12arr[ema12arr.length-1], ema26=ema26arr[ema26arr.length-1];
   const ema20=ema20arr[ema20arr.length-1], ema50=ema50arr[ema50arr.length-1];
+  const ema200=ema200arr?ema200arr[ema200arr.length-1]:null;
   const emaPos=price>ema20?'above':price<ema20?'below':'near';
   // BB
   const bbArr=calcBB(closes,20);
@@ -563,8 +701,13 @@ async function processStock(ticker, data) {
   // VWAP
   const vwap=calcVWAP(candles, volumes);
 
+  // Swing High/Low (look-back 5 bars each side)
+  const swings=calcSwings(highs,lows,5);
+  // Support / Resistance zones from swing points
+  const srLevels=calcSRLevels(swings, price);
+
   const signal=calcSignal({rsi,macdHist,macdHistPrev:histPrev,emaPos,bb,price,stTrend,volScore,vwap});
-  return{price,chg,pct,high52,low52,rsi,macdHist,macdHistPrev:histPrev,ema20,ema50,emaPos,bb,stTrend,volScore,vwap,atr,signal,candles,volumes,ts:Date.now()};
+  return{price,chg,pct,high52,low52,rsi,macdHist,macdHistPrev:histPrev,ema12,ema26,ema20,ema50,ema200,emaPos,bb,stTrend,volScore,vwap,atr,swings,srLevels,signal,candles,volumes,ts:Date.now()};
 }
 
 // ── Fetch ──
@@ -1254,16 +1397,16 @@ function fillDetail(ticker,d){
   if(d.rsi<35)rows.push({c:'buy',t:`RSI ${d.rsi.toFixed(1)} — Oversold โอกาสฟื้นตัว`});
   else if(d.rsi>65)rows.push({c:'sell',t:`RSI ${d.rsi.toFixed(1)} — Overbought ระวังปรับฐาน`});
   else rows.push({c:'hold',t:`RSI ${d.rsi.toFixed(1)} — Neutral Zone`});
-  if(d.macdHist>0&&d.macdHist>d.macdHistPrev)rows.push({c:'buy',t:'MACD Histogram เพิ่มขึ้น — Bullish Momentum'});
-  else if(d.macdHist>0)rows.push({c:'buy',t:'MACD อยู่ในแดน Positive'});
-  else if(d.macdHist<0&&d.macdHist<d.macdHistPrev)rows.push({c:'sell',t:'MACD Histogram ลดลง — Bearish Momentum'});
-  else rows.push({c:'sell',t:'MACD อยู่ในแดน Negative'});
-  if(d.emaPos==='above')rows.push({c:'buy',t:`ราคา ${p.toFixed(2)} เหนือ EMA20 (${d.ema20?.toFixed(2)}) — Uptrend`});
-  else if(d.emaPos==='below')rows.push({c:'sell',t:`ราคา ${p.toFixed(2)} ต่ำกว่า EMA20 (${d.ema20?.toFixed(2)}) — Downtrend`});
-  else rows.push({c:'hold',t:'ราคาใกล้ EMA20 — Sideways'});
-  if(d.high52&&d.low52){const pos=Math.round(((p-d.low52)/(d.high52-d.low52))*100)||50;rows.push({c:pos>70?'sell':pos<30?'buy':'hold',t:`ราคาที่ ${pos}% ของ 52-Week Range (${d.low52.toFixed(2)}–${d.high52.toFixed(2)})`});}
-  if(d.vwap){const diff=((p-d.vwap)/d.vwap*100);const abv=diff>=0;rows.push({c:abv?(diff>3?'sell':'hold'):(diff<-2?'buy':'hold'),t:`VWAP (20d): ${d.vwap.toFixed(2)} — ราคา${abv?'สูงกว่า':'ต่ำกว่า'} ${Math.abs(diff).toFixed(1)}% ${diff<-2?'✅ จุดเข้าดี':diff>3?'⚠️ แพงกว่าเฉลี่ย':''}`});}
-  document.getElementById('analysisBox').innerHTML=rows.map(r=>`<div class="ab-row"><span class="ab-dot" style="background:var(--${r.c})"></span><span>${r.t}</span></div>`).join('');
+  // Deep analysis panel
+  const analysisRows = buildAnalysis(ticker, d);
+  const lastRow = analysisRows[analysisRows.length-1];
+  const bodyRows = analysisRows.slice(0,-1);
+  document.getElementById('analysisBox').innerHTML=`
+    <div class="an-title">🔍 Technical Analysis (1D)</div>
+    ${bodyRows.map(r=>`<div class="ab-row"><span class="ab-dot" style="background:var(--${r.c})"></span><span>${r.t}</span></div>`).join('')}
+    <div class="an-final an-${lastRow.c}">${lastRow.t}</div>
+    <div style="font-size:10px;color:var(--fg3);padding:6px 0 2px">ข้อมูล 1D จาก Yahoo Finance — ไม่รองรับ 4H / ระดับ Support/Resistance อิงจาก Swing ย้อนหลัง 6M</div>
+  `;
 }
 
 async function loadDetailChart(ticker,range,interval){
